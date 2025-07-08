@@ -1,51 +1,85 @@
-# EKS Terraform Pipeline
+# CloudKube EKS Terraform Pipeline
 
-This repository contains Terraform code to provision an Amazon EKS (Elastic Kubernetes Service) cluster and a CI/CD pipeline to manage its deployment.
+This project provides a complete and working Terraform and GitHub Actions setup to provision an AWS EKS cluster.
 
-## Overview
+## Features
 
-[Provide a more detailed description of the project here. What is its purpose? What does the pipeline do?]
+- **Terraform EKS Provisioning**: Creates a new VPC with public and private subnets, security groups, and an EKS cluster with managed node groups.
+- **GitHub Actions CI/CD**: A pipeline that automates `terraform fmt`, `validate`, `plan`, and `apply`.
+- **Well-Structured**: The project is organized into a clean and easy-to-understand folder structure with local modules for VPC and EKS.
+- **Best Practices**: Follows AWS and Terraform best practices for security and maintainability.
+
+## Terraform Documentation
+
+<!-- BEGIN_TF_DOCS -->
+<!-- END_TF_DOCS -->
 
 ## Prerequisites
 
-- [Terraform](https://www.terraform.io/downloads.html)
-- [AWS CLI](https://aws.amazon.com/cli/)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+- [Terraform](https://learn.hashicorp.com/tutorials/terraform/install-cli) >= 1.5
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-install.html)
+- An AWS account with the necessary permissions to create the resources.
 
-## Setup
+## Local Usage
 
 1. **Clone the repository:**
 
-   ```bash
-   git clone git@github.com:eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb.git
-   cd cloudkube-eks-terraform-pipeline-enb
+   ```sh
+   git clone https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb.git
+   cd cloudkube-eks-terraform-pipeline-enb/infra
    ```
 
 2. **Configure AWS Credentials:**
-   Ensure your AWS credentials are configured correctly.
+
+   Make sure your AWS credentials are configured correctly. You can do this by setting the following environment variables:
+
+   ```sh
+   export AWS_ACCESS_KEY_ID="your-access-key"
+   export AWS_SECRET_ACCESS_KEY="your-secret-key"
+   export AWS_REGION="us-east-1"
+   ```
 
 3. **Initialize Terraform:**
-   ```bash
+
+   ```sh
    terraform init
    ```
 
-## Usage
+4. **Plan the deployment:**
 
-1. **Plan the infrastructure:**
-
-   ```bash
+   ```sh
    terraform plan
    ```
 
-2. **Apply the changes:**
-   ```bash
+5. **Apply the changes:**
+
+   ```sh
    terraform apply
    ```
 
-## Pipeline
+## GitHub Actions CI/CD
 
-[Describe the CI/CD pipeline here. What triggers it? What are the stages?]
+The CI/CD pipeline is defined in `.github/workflows/terraform-eks-pipeline.yml`. It will trigger on every push or pull request to the `main` branch.
 
-## Contributing
+### Secrets
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+The pipeline requires the following secrets to be configured in your GitHub repository settings:
+
+- `AWS_ACCESS_KEY_ID`: Your AWS access key ID.
+- `AWS_SECRET_ACCESS_KEY`: Your AWS secret access key.
+- `AWS_REGION`: The AWS region where you want to deploy the resources (e.g., `us-east-1`).
+
+### Pipeline Stages
+
+- **Checkout**: Checks out the code from the repository.
+- **Configure AWS Credentials**: Configures the AWS credentials for Terraform.
+- **Setup Terraform**: Sets up the specified version of Terraform.
+- **Terraform Init**: Initializes the Terraform backend.
+- **Terraform Format**: Checks if the code is correctly formatted.
+- **Terraform Validate**: Validates the Terraform configuration.
+- **Terraform Plan**: Creates an execution plan (only for pull requests).
+- **Terraform Apply**: Applies the changes to the infrastructure (only for pushes to `main`).
+
+## Terraform State
+
+The Terraform state is configured to be stored locally by default. For production environments, it is recommended to use a remote backend like Amazon S3. The `infra/backend.tf` file contains a commented-out S3 backend configuration that you can use as a starting point.

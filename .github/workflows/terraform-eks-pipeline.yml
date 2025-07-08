@@ -1,0 +1,62 @@
+name: "Terraform EKS Pipeline"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  terraform:
+    name: "Terraform"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infra
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v3
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: "Setup Terraform"
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
+
+      - name: "Terraform Init"
+        id: init
+        run: terraform init
+
+      - name: "Terraform Format"
+        id: fmt
+        run: terraform fmt -check
+
+      - name: "Terraform Validate"
+        id: validate
+        run: terraform validate
+
+      - name: "Terraform Plan"
+        id: plan
+        run: terraform plan -no-color
+        if: github.event_name == 'pull_request'
+
+      - name: "Terraform Apply"
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve
+
+      - name: "Generate Terraform Docs"
+        uses: terraform-docs/gh-actions@v1
+        with:
+          working-dir: infra
+          output-file: README.md
+          output-method: inject
+          git-push: "true"
