@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Terraform Backend Configuration
+# Terraform Backend
 # ------------------------------------------------------------------------------
 #
 # This backend configuration is commented out by default to allow for local
