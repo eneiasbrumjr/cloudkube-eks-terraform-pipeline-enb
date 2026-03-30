@@ -1,0 +1,102 @@
+# ------------------------------------------------------------------------------
+# Example Terraform Variables File
+# ------------------------------------------------------------------------------
+# Copy this file to terraform.tfvars and customize the values for your environment
+# cp terraform.tfvars.example terraform.tfvars
+#
+# NOTE: terraform.tfvars is in .gitignore to prevent committing sensitive data
+
+# ------------------------------------------------------------------------------
+# Project Configuration
+# ------------------------------------------------------------------------------
+
+project_name = "cloudkube-eks"
+environment  = "dev"  # Options: dev, staging, production
+aws_region   = "us-east-1"
+
+# ------------------------------------------------------------------------------
+# VPC Configuration
+# ------------------------------------------------------------------------------
+
+vpc_cidr_block             = "10.0.0.0/16"
+public_subnet_cidr_blocks  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidr_blocks = ["10.0.3.0/24", "10.0.4.0/24"]
+
+# Cost Optimization: Set to false to disable NAT Gateways in dev environments
+enable_nat_gateway = true
+
+# High Availability: Set to false for single NAT Gateway (cost saving)
+# WARNING: Not recommended for production
+single_nat_gateway = false
+
+# Security: Enable VPC Flow Logs for network monitoring
+enable_vpc_flow_logs = true
+
+# ------------------------------------------------------------------------------
+# EKS Cluster Configuration
+# ------------------------------------------------------------------------------
+
+eks_cluster_version = "1.28"
+
+# Node Group Scaling
+eks_desired_capacity = 2
+eks_max_size         = 4
+eks_min_size         = 1
+
+# Instance Configuration
+eks_instance_types = ["t3.medium", "t3a.medium"]
+eks_disk_size      = 20
+
+# SSH Access (leave empty to disable SSH access to nodes)
+eks_ssh_key_name = ""
+
+# Security: Enable encryption of Kubernetes secrets with KMS
+enable_cluster_encryption = true
+
+# Cluster Endpoint Access
+cluster_endpoint_public_access  = true
+cluster_endpoint_private_access = true
+
+# Control Plane Logging (all types enabled for maximum visibility)
+cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+# IAM Roles for Service Accounts (IRSA) - Recommended for pod-level permissions
+enable_irsa = true
+
+# ------------------------------------------------------------------------------
+# Security Configuration
+# ------------------------------------------------------------------------------
+
+# CIDR blocks allowed to access the cluster API endpoint
+# IMPORTANT: Restrict this to your IP or corporate VPN in production
+allowed_cidr_blocks = ["0.0.0.0/0"]
+
+# Pod Security Policy (deprecated in K8s 1.25+)
+enable_pod_security_policy = false
+
+# ------------------------------------------------------------------------------
+# Cost Optimization
+# ------------------------------------------------------------------------------
+
+# Use Spot Instances for cost savings (not recommended for production)
+enable_spot_instances = false
+spot_instance_pools   = 2
+
+# ------------------------------------------------------------------------------
+# Monitoring and Observability
+# ------------------------------------------------------------------------------
+
+# CloudWatch Log Group for EKS Control Plane
+create_cloudwatch_log_group         = true
+cloudwatch_log_group_retention_days = 7  # Options: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, etc.
+
+# ------------------------------------------------------------------------------
+# Additional Tags
+# ------------------------------------------------------------------------------
+
+additional_tags = {
+  Owner       = "DevOps Team"
+  CostCenter  = "Engineering"
+  Compliance  = "PCI-DSS"
+  Backup      = "true"
+}
