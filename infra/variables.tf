@@ -81,7 +81,7 @@ variable "enable_nat_gateway" {
 variable "single_nat_gateway" {
   description = "Use a single NAT Gateway instead of one per AZ to reduce costs (not recommended for production)."
   type        = bool
-  default     = false
+  default     = true # Changed to true for cost optimization - use false only in production
 }
 
 variable "enable_vpc_flow_logs" {
@@ -119,7 +119,7 @@ variable "eks_desired_capacity" {
 variable "eks_max_size" {
   description = "The maximum number of nodes in the EKS cluster."
   type        = number
-  default     = 4
+  default     = 3 # Reduced from 4 for cost optimization
 
   validation {
     condition     = var.eks_max_size >= 1 && var.eks_max_size <= 100
@@ -173,6 +173,12 @@ variable "cluster_endpoint_public_access" {
   default     = true
 }
 
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "List of CIDR blocks that can access the public API endpoint. Restrict to your IP for better security."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "cluster_endpoint_private_access" {
   description = "Enable private access to the cluster endpoint."
   type        = bool
@@ -217,11 +223,7 @@ variable "enable_cluster_autoscaler" {
 # Security and Compliance Variables
 # ------------------------------------------------------------------------------
 
-variable "allowed_cidr_blocks" {
-  description = "List of CIDR blocks allowed to access the EKS cluster API endpoint."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
+# Removed - consolidated with cluster_endpoint_public_access_cidrs
 
 variable "enable_pod_security_policy" {
   description = "Enable Pod Security Policy (deprecated in K8s 1.25+, use Pod Security Standards instead)."
@@ -258,7 +260,7 @@ variable "create_cloudwatch_log_group" {
 variable "cloudwatch_log_group_retention_days" {
   description = "Number of days to retain CloudWatch logs."
   type        = number
-  default     = 7
+  default     = 3 # Reduced from 7 for cost optimization in dev/test environments
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.cloudwatch_log_group_retention_days)

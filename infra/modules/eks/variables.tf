@@ -83,7 +83,7 @@ variable "enable_irsa" {
   type        = bool
 }
 
-variable "allowed_cidr_blocks" {
+variable "cluster_endpoint_public_access_cidrs" {
   description = "List of CIDR blocks allowed to access the EKS cluster API endpoint."
   type        = list(string)
 }

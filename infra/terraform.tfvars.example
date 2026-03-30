@@ -23,13 +23,15 @@ public_subnet_cidr_blocks  = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidr_blocks = ["10.0.3.0/24", "10.0.4.0/24"]
 
 # Cost Optimization: Set to false to disable NAT Gateways in dev environments
+# Estimated savings: ~$32/month per NAT Gateway
 enable_nat_gateway = true
 
-# High Availability: Set to false for single NAT Gateway (cost saving)
-# WARNING: Not recommended for production
-single_nat_gateway = false
+# High Availability vs. Cost: single NAT Gateway saves ~$32/month
+# Default: true (single NAT) - Change to false for production high availability
+single_nat_gateway = true
 
 # Security: Enable VPC Flow Logs for network monitoring
+# Cost: ~$0.50/GB ingested to CloudWatch
 enable_vpc_flow_logs = true
 
 # ------------------------------------------------------------------------------
@@ -38,38 +40,43 @@ enable_vpc_flow_logs = true
 
 eks_cluster_version = "1.28"
 
-# Node Group Scaling
-eks_desired_capacity = 2
-eks_max_size         = 4
-eks_min_size         = 1
+# Node Group Scaling - Start small, scale as needed
+eks_desired_capacity = 2  # Recommended starting point
+eks_max_size         = 3  # Optimized for cost (reduced from 4)
+eks_min_size         = 1  # Can scale down to 1 during low usage
 
-# Instance Configuration
+# Instance Configuration - Mixed types for cost optimization
+# t3.medium: ~$0.0416/hour, t3a.medium: ~$0.0374/hour
 eks_instance_types = ["t3.medium", "t3a.medium"]
-eks_disk_size      = 20
+eks_disk_size      = 20  # Minimum recommended size
 
 # SSH Access (leave empty to disable SSH access to nodes)
+# Security Best Practice: Use SSM Session Manager instead of SSH
 eks_ssh_key_name = ""
 
 # Security: Enable encryption of Kubernetes secrets with KMS
+# Cost: ~$1/month per key + $0.03 per 10,000 requests
 enable_cluster_encryption = true
 
 # Cluster Endpoint Access
 cluster_endpoint_public_access  = true
 cluster_endpoint_private_access = true
 
+# Security: Restrict API access to your IP/VPN
+# IMPORTANT: Change from 0.0.0.0/0 to your IP for production!
+# Example: ["203.0.113.0/24", "198.51.100.0/24"]
+cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+
 # Control Plane Logging (all types enabled for maximum visibility)
+# Cost: ~$0.50/GB ingested, recommend all types for security
 cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
-# IAM Roles for Service Accounts (IRSA) - Recommended for pod-level permissions
+# IAM Roles for Service Accounts (IRSA) - No additional cost, highly recommended
 enable_irsa = true
 
 # ------------------------------------------------------------------------------
 # Security Configuration
 # ------------------------------------------------------------------------------
-
-# CIDR blocks allowed to access the cluster API endpoint
-# IMPORTANT: Restrict this to your IP or corporate VPN in production
-allowed_cidr_blocks = ["0.0.0.0/0"]
 
 # Pod Security Policy (deprecated in K8s 1.25+)
 enable_pod_security_policy = false
@@ -78,7 +85,9 @@ enable_pod_security_policy = false
 # Cost Optimization
 # ------------------------------------------------------------------------------
 
-# Use Spot Instances for cost savings (not recommended for production)
+# Spot Instances: 60-90% cost savings vs On-Demand
+# WARNING: Can be interrupted with 2-minute notice
+# Recommended: false for production, true for dev/test
 enable_spot_instances = false
 spot_instance_pools   = 2
 
@@ -87,16 +96,103 @@ spot_instance_pools   = 2
 # ------------------------------------------------------------------------------
 
 # CloudWatch Log Group for EKS Control Plane
-create_cloudwatch_log_group         = true
-cloudwatch_log_group_retention_days = 7  # Options: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, etc.
+create_cloudwatch_log_group = true
+
+# Log Retention: Balance between cost and compliance
+# Shorter retention = Lower costs
+# Options: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, etc.
+cloudwatch_log_group_retention_days = 3  # Optimized for dev/test (reduced from 7)
 
 # ------------------------------------------------------------------------------
 # Additional Tags
 # ------------------------------------------------------------------------------
 
 additional_tags = {
-  Owner       = "DevOps Team"
-  CostCenter  = "Engineering"
-  Compliance  = "PCI-DSS"
-  Backup      = "true"
+  Owner      = "DevOps Team"
+  CostCenter = "Engineering"
+  Backup     = "true"
 }
+
+# ==============================================================================
+# COST ESTIMATION (us-east-1, monthly)
+# ==============================================================================
+#
+# Based on the default configuration above:
+#
+# EKS Control Plane:                   $72.00/month (fixed)
+# EC2 Instances (2x t3.medium):        ~$60.00/month ($0.0416/hour × 2 × 730 hours)
+# NAT Gateway (1x):                    ~$32.00/month ($0.045/hour × 730 hours)
+# NAT Gateway Data Transfer:           ~$5-20/month (depends on usage)
+# EBS Volumes (2x 20GB gp3):           ~$3.20/month ($0.08/GB × 40GB)
+# KMS Key:                             ~$1.00/month
+# CloudWatch Logs:                     ~$2-10/month (depends on volume)
+# VPC Flow Logs:                       ~$1-5/month (depends on traffic)
+#
+# TOTAL ESTIMATED COST:                $176-203/month
+#
+# ==============================================================================
+# COST OPTIMIZATION STRATEGIES
+# ==============================================================================
+#
+# 1. IMMEDIATE SAVINGS (Development/Testing):
+#    - Set enable_nat_gateway = false                  → Save $32-52/month
+#    - Set enable_spot_instances = true                → Save $36/month (60% off EC2)
+#    - Set cloudwatch_log_group_retention_days = 1     → Save ~$1-3/month
+#    - Reduce cluster_enabled_log_types = ["api"]      → Save ~$1-5/month
+#    - Set eks_min_size = 1, desired = 1               → Save $30/month (1 less node)
+#
+#    TOTAL DEV SAVINGS: ~$100-121/month (57% reduction)
+#    ESTIMATED DEV COST: ~$75-82/month
+#
+# 2. SCHEDULED SCALING (Non-production):
+#    - Scale down to min_size during nights/weekends
+#    - Use AWS Instance Scheduler or Lambda
+#    - POTENTIAL SAVINGS: 30-50% on EC2 costs
+#
+# 3. PRODUCTION OPTIMIZATIONS:
+#    - Use Compute Savings Plans (1-3 year)            → Save 20-40% on EC2
+#    - Enable single_nat_gateway = true cautiously     → Save $32/month
+#    - Use t3a instead of t3 instances                 → Save 10% on EC2
+#    - Right-size based on actual usage
+#    - Implement cluster autoscaler aggressively
+#
+# 4. MONITORING & OPTIMIZATION:
+#    - Enable AWS Cost Explorer
+#    - Set up AWS Budgets with alerts
+#    - Review unused resources monthly
+#    - Consider Reserved Instances for stable workloads
+#
+# ==============================================================================
+# SECURITY BEST PRACTICES (MINIMAL COST IMPACT)
+# ==============================================================================
+#
+# 1. Network Security (Implemented):
+#    ✓ Private subnets for worker nodes
+#    ✓ VPC Flow Logs enabled
+#    ✓ Security groups with least privilege
+#    ✓ Network ACLs configured
+#
+# 2. Data Protection (Implemented):
+#    ✓ KMS encryption for secrets
+#    ✓ Encrypted CloudWatch Logs
+#    ✓ HTTPS endpoints only
+#
+# 3. Access Control (Implemented):
+#    ✓ IRSA for pod-level permissions
+#    ✓ No SSH keys by default
+#    ✓ SSM for node access
+#    ✓ Configurable API endpoint access
+#
+# 4. Compliance & Audit (Implemented):
+#    ✓ Control plane logging
+#    ✓ Resource tagging
+#    ✓ Automated security scanning (tfsec)
+#
+# 5. RECOMMENDED ACTIONS:
+#    → Change cluster_endpoint_public_access_cidrs to your IP
+#    → Enable AWS GuardDuty (~$5-10/month)
+#    → Implement Pod Security Standards (free)
+#    → Use AWS Secrets Manager for sensitive data
+#    → Enable AWS Config for compliance tracking
+#
+# ==============================================================================
