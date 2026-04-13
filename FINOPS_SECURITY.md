@@ -186,9 +186,9 @@ cluster_endpoint_public_access = false
    - 30-day deletion window for recovery
    - All Kubernetes secrets encrypted at rest
 
-2. **Encrypted CloudWatch Logs**
-   - Control plane logs encrypted
-   - VPC Flow Logs encrypted
+2. **CloudWatch Log Retention Controls**
+   - Control plane log retention configurable
+   - VPC Flow Logs sent to CloudWatch Logs
 
 3. **HTTPS Only**
    - All API communications over TLS
@@ -216,10 +216,10 @@ cluster_endpoint_public_access = false
    - SSH access disabled unless explicitly configured
    - Use AWS Systems Manager Session Manager instead
 
-3. **SSM Access for Worker Nodes**
-   - Secure shell access via Systems Manager
-   - No need to expose SSH ports
-   - Full audit trail in CloudTrail
+3. **SSM Access Policy on Worker Nodes**
+   - `AmazonSSMManagedInstanceCore` attached to the node IAM role
+   - No need to expose SSH ports when SSM connectivity is available
+   - Session logging and audit behavior depend on your AWS account configuration
 
 4. **Least Privilege IAM Roles**
    - Cluster role: Only required EKS permissions

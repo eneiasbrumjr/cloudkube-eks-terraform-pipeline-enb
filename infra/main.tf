@@ -26,7 +26,7 @@ module "eks" {
   project_name                         = var.project_name
   environment                          = var.environment
   vpc_id                               = module.vpc.vpc_id
-  subnet_ids                           = concat(module.vpc.public_subnet_ids, module.vpc.private_subnet_ids)
+  subnet_ids                           = module.vpc.private_subnet_ids
   private_subnet_ids                   = module.vpc.private_subnet_ids
   eks_cluster_version                  = var.eks_cluster_version
   eks_desired_capacity                 = var.eks_desired_capacity
@@ -42,7 +42,6 @@ module "eks" {
   enable_irsa                          = var.enable_irsa
   cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
   enable_spot_instances                = var.enable_spot_instances
-  spot_instance_pools                  = var.spot_instance_pools
   create_cloudwatch_log_group          = var.create_cloudwatch_log_group
   cloudwatch_log_group_retention_days  = var.cloudwatch_log_group_retention_days
   additional_tags                      = var.additional_tags

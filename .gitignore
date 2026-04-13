@@ -1,10 +1,16 @@
 # Terraform
-.terraform
+.terraform/
 *.tfstate
 *.tfstate.backup
 *.tfvars
 *.tfplan
-.terraform.lock.hcl
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
 # Mac
 .DS_Store

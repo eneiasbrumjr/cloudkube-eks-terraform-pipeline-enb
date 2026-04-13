@@ -93,11 +93,6 @@ variable "enable_spot_instances" {
   type        = bool
 }
 
-variable "spot_instance_pools" {
-  description = "Number of Spot Instance pools to use."
-  type        = number
-}
-
 variable "create_cloudwatch_log_group" {
   description = "Create CloudWatch Log Group for EKS control plane logs."
   type        = bool
