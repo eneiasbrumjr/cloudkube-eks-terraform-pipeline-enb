@@ -2,6 +2,10 @@
 # KMS Key for EKS Cluster Encryption
 # ------------------------------------------------------------------------------
 
+locals {
+  cluster_name = "${var.project_name}-${var.environment}"
+}
+
 resource "aws_kms_key" "eks" {
   count = var.enable_cluster_encryption ? 1 : 0
 
@@ -88,7 +92,7 @@ resource "aws_iam_role_policy_attachment" "eks_vpc_resource_controller" {
 # ------------------------------------------------------------------------------
 
 resource "aws_eks_cluster" "main" {
-  name     = "${var.project_name}-${var.environment}"
+  name     = local.cluster_name
   role_arn = aws_iam_role.eks_cluster.arn
   version  = var.eks_cluster_version
 
@@ -209,7 +213,7 @@ resource "aws_iam_role_policy_attachment" "eks_ssm_managed_instance_core" {
 
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.project_name}-${var.environment}-node-group"
+  node_group_name = "${local.cluster_name}-node-group"
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = var.private_subnet_ids
   version         = var.eks_cluster_version
@@ -308,9 +312,9 @@ resource "aws_security_group" "eks_nodes" {
 
   tags = merge(
     {
-      Name                                        = "${var.project_name}-${var.environment}-node-sg"
-      Environment                                 = var.environment
-      "kubernetes.io/cluster/${var.project_name}" = "owned"
+      Name                                          = "${var.project_name}-${var.environment}-node-sg"
+      Environment                                   = var.environment
+      "kubernetes.io/cluster/${local.cluster_name}" = "owned"
     },
     var.additional_tags
   )

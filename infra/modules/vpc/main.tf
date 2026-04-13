@@ -2,6 +2,10 @@
 # VPC (Virtual Private Cloud)
 # ------------------------------------------------------------------------------
 
+locals {
+  cluster_name = "${var.project_name}-${var.environment}"
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr_block
   enable_dns_support   = true
@@ -116,11 +120,11 @@ resource "aws_subnet" "public" {
 
   tags = merge(
     {
-      Name                                        = "${var.project_name}-${var.environment}-public-subnet-${count.index + 1}"
-      Environment                                 = var.environment
-      Type                                        = "public"
-      "kubernetes.io/cluster/${var.project_name}" = "shared"
-      "kubernetes.io/role/elb"                    = "1"
+      Name                                          = "${var.project_name}-${var.environment}-public-subnet-${count.index + 1}"
+      Environment                                   = var.environment
+      Type                                          = "public"
+      "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+      "kubernetes.io/role/elb"                      = "1"
     },
     var.additional_tags
   )
@@ -134,11 +138,11 @@ resource "aws_subnet" "private" {
 
   tags = merge(
     {
-      Name                                        = "${var.project_name}-${var.environment}-private-subnet-${count.index + 1}"
-      Environment                                 = var.environment
-      Type                                        = "private"
-      "kubernetes.io/cluster/${var.project_name}" = "shared"
-      "kubernetes.io/role/internal-elb"           = "1"
+      Name                                          = "${var.project_name}-${var.environment}-private-subnet-${count.index + 1}"
+      Environment                                   = var.environment
+      Type                                          = "private"
+      "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+      "kubernetes.io/role/internal-elb"             = "1"
     },
     var.additional_tags
   )

@@ -38,7 +38,7 @@ enable_vpc_flow_logs = true
 # EKS Cluster Configuration
 # ------------------------------------------------------------------------------
 
-eks_cluster_version = "1.28"
+eks_cluster_version = "1.29"
 
 # Node Group Scaling - Start small, scale as needed
 eks_desired_capacity = 2  # Recommended starting point
@@ -62,9 +62,9 @@ enable_cluster_encryption = true
 cluster_endpoint_public_access  = true
 cluster_endpoint_private_access = true
 
-# Security: Restrict API access to your IP/VPN
-# IMPORTANT: Change from 0.0.0.0/0 to your IP for production!
-# Example: ["203.0.113.0/24", "198.51.100.0/24"]
+# Security: Restrict API access to your IP/VPN before any real deployment.
+# IMPORTANT: 0.0.0.0/0 is convenient for first-time testing, not a production setting.
+# Example: ["203.0.113.10/32"]
 cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
 # Control Plane Logging (all types enabled for maximum visibility)
@@ -75,13 +75,6 @@ cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager
 enable_irsa = true
 
 # ------------------------------------------------------------------------------
-# Security Configuration
-# ------------------------------------------------------------------------------
-
-# Pod Security Policy (deprecated in K8s 1.25+)
-enable_pod_security_policy = false
-
-# ------------------------------------------------------------------------------
 # Cost Optimization
 # ------------------------------------------------------------------------------
 
@@ -89,7 +82,6 @@ enable_pod_security_policy = false
 # WARNING: Can be interrupted with 2-minute notice
 # Recommended: false for production, true for dev/test
 enable_spot_instances = false
-spot_instance_pools   = 2
 
 # ------------------------------------------------------------------------------
 # Monitoring and Observability
@@ -99,9 +91,9 @@ spot_instance_pools   = 2
 create_cloudwatch_log_group = true
 
 # Log Retention: Balance between cost and compliance
-# Shorter retention = Lower costs
+# Default keeps one month of control-plane logs.
 # Options: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, etc.
-cloudwatch_log_group_retention_days = 3  # Optimized for dev/test (reduced from 7)
+cloudwatch_log_group_retention_days = 30
 
 # ------------------------------------------------------------------------------
 # Additional Tags
@@ -170,17 +162,16 @@ additional_tags = {
 #    ✓ Private subnets for worker nodes
 #    ✓ VPC Flow Logs enabled
 #    ✓ Security groups with least privilege
-#    ✓ Network ACLs configured
+#    ✓ Baseline network ACL associated to all subnets
 #
 # 2. Data Protection (Implemented):
 #    ✓ KMS encryption for secrets
-#    ✓ Encrypted CloudWatch Logs
 #    ✓ HTTPS endpoints only
 #
 # 3. Access Control (Implemented):
 #    ✓ IRSA for pod-level permissions
 #    ✓ No SSH keys by default
-#    ✓ SSM for node access
+#    ✓ SSM policy attached to node IAM role
 #    ✓ Configurable API endpoint access
 #
 # 4. Compliance & Audit (Implemented):

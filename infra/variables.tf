@@ -56,8 +56,10 @@ variable "public_subnet_cidr_blocks" {
   default     = ["10.0.1.0/24", "10.0.2.0/24"]
 
   validation {
-    condition     = length(var.public_subnet_cidr_blocks) >= 2
-    error_message = "At least 2 public subnets are required for high availability."
+    condition = length(var.public_subnet_cidr_blocks) >= 2 && alltrue([
+      for cidr in var.public_subnet_cidr_blocks : can(cidrhost(cidr, 0))
+    ])
+    error_message = "Provide at least 2 valid public subnet CIDR blocks."
   }
 }
 
@@ -67,8 +69,15 @@ variable "private_subnet_cidr_blocks" {
   default     = ["10.0.3.0/24", "10.0.4.0/24"]
 
   validation {
-    condition     = length(var.private_subnet_cidr_blocks) >= 2
-    error_message = "At least 2 private subnets are required for high availability."
+    condition = length(var.private_subnet_cidr_blocks) >= 2 && alltrue([
+      for cidr in var.private_subnet_cidr_blocks : can(cidrhost(cidr, 0))
+    ])
+    error_message = "Provide at least 2 valid private subnet CIDR blocks."
+  }
+
+  validation {
+    condition     = length(var.private_subnet_cidr_blocks) >= length(var.public_subnet_cidr_blocks)
+    error_message = "Private subnet count must be greater than or equal to the number of public subnets."
   }
 }
 
@@ -81,7 +90,7 @@ variable "enable_nat_gateway" {
 variable "single_nat_gateway" {
   description = "Use a single NAT Gateway instead of one per AZ to reduce costs (not recommended for production)."
   type        = bool
-  default     = true # Changed to true for cost optimization - use false only in production
+  default     = true
 }
 
 variable "enable_vpc_flow_logs" {
@@ -97,11 +106,11 @@ variable "enable_vpc_flow_logs" {
 variable "eks_cluster_version" {
   description = "The Kubernetes version for the EKS cluster."
   type        = string
-  default     = "1.28"
+  default     = "1.29"
 
   validation {
-    condition     = can(regex("^1\\.(2[7-9]|[3-9][0-9])$", var.eks_cluster_version))
-    error_message = "EKS cluster version must be 1.27 or higher."
+    condition     = contains(["1.29", "1.30", "1.31", "1.32", "1.33"], var.eks_cluster_version)
+    error_message = "EKS cluster version must be one of the explicitly supported Kubernetes minor versions."
   }
 }
 
@@ -119,7 +128,7 @@ variable "eks_desired_capacity" {
 variable "eks_max_size" {
   description = "The maximum number of nodes in the EKS cluster."
   type        = number
-  default     = 3 # Reduced from 4 for cost optimization
+  default     = 3
 
   validation {
     condition     = var.eks_max_size >= 1 && var.eks_max_size <= 100
@@ -142,6 +151,11 @@ variable "eks_instance_types" {
   description = "The EC2 instance types for the EKS nodes. Multiple types enable mixed instance policies."
   type        = list(string)
   default     = ["t3.medium", "t3a.medium"]
+
+  validation {
+    condition     = length(var.eks_instance_types) > 0 && alltrue([for instance_type in var.eks_instance_types : trimspace(instance_type) != ""])
+    error_message = "Provide at least one non-empty EC2 instance type."
+  }
 }
 
 variable "eks_disk_size" {
@@ -177,6 +191,18 @@ variable "cluster_endpoint_public_access_cidrs" {
   description = "List of CIDR blocks that can access the public API endpoint. Restrict to your IP for better security."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+
+  validation {
+    condition = alltrue([
+      for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0))
+    ])
+    error_message = "Cluster endpoint public access CIDRs must be valid IPv4 CIDR blocks."
+  }
+
+  validation {
+    condition     = length(var.cluster_endpoint_public_access_cidrs) > 0
+    error_message = "Provide at least one CIDR block."
+  }
 }
 
 variable "cluster_endpoint_private_access" {
@@ -189,46 +215,20 @@ variable "cluster_enabled_log_types" {
   description = "List of control plane logging types to enable."
   type        = list(string)
   default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  validation {
+    condition = length(var.cluster_enabled_log_types) > 0 && alltrue([
+      for log_type in var.cluster_enabled_log_types :
+      contains(["api", "audit", "authenticator", "controllerManager", "scheduler"], log_type)
+    ])
+    error_message = "Cluster log types must be valid EKS control plane log types."
+  }
 }
 
 variable "enable_irsa" {
   description = "Enable IAM Roles for Service Accounts (IRSA) for pod-level IAM permissions."
   type        = bool
   default     = true
-}
-
-# ------------------------------------------------------------------------------
-# EKS Add-ons Variables
-# ------------------------------------------------------------------------------
-
-variable "enable_aws_load_balancer_controller" {
-  description = "Enable AWS Load Balancer Controller add-on."
-  type        = bool
-  default     = true
-}
-
-variable "enable_metrics_server" {
-  description = "Enable Metrics Server for resource metrics."
-  type        = bool
-  default     = true
-}
-
-variable "enable_cluster_autoscaler" {
-  description = "Enable Cluster Autoscaler for automatic node scaling."
-  type        = bool
-  default     = true
-}
-
-# ------------------------------------------------------------------------------
-# Security and Compliance Variables
-# ------------------------------------------------------------------------------
-
-# Removed - consolidated with cluster_endpoint_public_access_cidrs
-
-variable "enable_pod_security_policy" {
-  description = "Enable Pod Security Policy (deprecated in K8s 1.25+, use Pod Security Standards instead)."
-  type        = bool
-  default     = false
 }
 
 # ------------------------------------------------------------------------------
@@ -241,16 +241,6 @@ variable "enable_spot_instances" {
   default     = false
 }
 
-variable "spot_instance_pools" {
-  description = "Number of Spot Instance pools to use when spot instances are enabled."
-  type        = number
-  default     = 2
-}
-
-# ------------------------------------------------------------------------------
-# Monitoring and Observability
-# ------------------------------------------------------------------------------
-
 variable "create_cloudwatch_log_group" {
   description = "Create CloudWatch Log Group for EKS control plane logs."
   type        = bool
@@ -260,7 +250,7 @@ variable "create_cloudwatch_log_group" {
 variable "cloudwatch_log_group_retention_days" {
   description = "Number of days to retain CloudWatch logs."
   type        = number
-  default     = 3 # Reduced from 7 for cost optimization in dev/test environments
+  default     = 30
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.cloudwatch_log_group_retention_days)
@@ -276,4 +266,9 @@ variable "additional_tags" {
   description = "Additional tags to apply to all resources."
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = alltrue([for key in keys(var.additional_tags) : !startswith(key, "aws:")])
+    error_message = "Additional tags must not use the reserved aws: prefix."
+  }
 }
