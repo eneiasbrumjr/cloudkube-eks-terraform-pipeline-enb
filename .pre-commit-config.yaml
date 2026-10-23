@@ -5,6 +5,8 @@
 # Setup: pre-commit install
 # Run manually: pre-commit run --all-files
 
+minimum_pre_commit_version: "4.4.0"
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -33,9 +35,18 @@ repos:
       - id: terraform_tflint
         args:
           - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
-      - id: terraform_tfsec
-        args:
-          - --args=--minimum-severity=MEDIUM
+
+  - repo: local
+    hooks:
+      - id: terraform_trivy
+        name: Terraform security scan (advisory)
+        entry: bash scripts/scan-terraform.sh
+        language: unsupported
+        types: [file]
+        pass_filenames: false
+        require_serial: true
+        always_run: true
+        verbose: true
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.1

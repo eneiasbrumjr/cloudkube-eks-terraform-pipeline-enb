@@ -64,6 +64,7 @@ Important limitations:
 │   └── modules
 │       ├── eks
 │       └── vpc
+├── scripts/scan-terraform.sh
 ├── .pre-commit-config.yaml
 ├── .terraform-docs.yml
 ├── .tflint.hcl
@@ -76,7 +77,7 @@ Important limitations:
 - AWS CLI v2
 - AWS credentials with permission to manage VPC, IAM, CloudWatch, KMS, and EKS resources
 - Optional:
-  `kubectl`, `pre-commit`, `tflint`, `tfsec`, `terraform-docs`
+  `kubectl`, `pre-commit >= 4.4.0`, `tflint`, `Trivy 0.76.1`, `terraform-docs`
 
 ## Quick Start
 
@@ -120,8 +121,8 @@ A push or pull request never starts a cloud plan or apply. Format failures, init
 ### Reports and generated documentation
 
 - The Trivy configuration scan remains **advisory**: findings at medium severity or above are reported without blocking this infrastructure baseline.
-- Trivy runs after Terraform validation, using a pinned version and its bundled checks. Parsing diagnostics, scanner execution failures, and a missing or invalid SARIF report fail the job. A successful security job does not mean there are no findings.
-- Every scan uploads a `trivy-results` artifact. Push and manual runs also upload SARIF to GitHub Security; pull requests use the artifact without requiring a write-capable token.
+- Trivy runs after Terraform validation through the same script used by the local security hook. Its version is pinned, and each scan uses an empty temporary cache to select bundled checks. Parsing diagnostics, scanner execution failures, and a missing or invalid SARIF report fail the job. A successful security job does not mean there are no findings.
+- Generated scan reports are uploaded as `trivy-results` artifacts. Successful push and manual scans also upload SARIF to GitHub Security; pull requests use the artifact without requiring a write-capable token. A failed scan cannot publish a partial analysis to GitHub Security.
 - Validation outcomes and the security finding count appear in the workflow summary.
 - Terraform documentation is generated as a `terraform-documentation` artifact. The workflow does not commit or push generated changes into a branch.
 - Saved Terraform plans remain in the apply runner and are not published as artifacts.
@@ -149,13 +150,18 @@ See [TEST_RESULTS.md](TEST_RESULTS.md) for executed checks and their limits.
 
 ## Local Contributor Workflow
 
+Install the local tools described in [CONTRIBUTING.md](CONTRIBUTING.md), including Trivy `0.76.1` and pre-commit `>= 4.4.0`.
+
 ```bash
 pre-commit install
+terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
 pre-commit run --all-files
 cd infra
 terraform fmt -recursive
 terraform validate
 ```
+
+For the security check alone, run `pre-commit run terraform_trivy --all-files` or `bash scripts/scan-terraform.sh` from the repository root. The script scans all of `infra`, shows advisory findings, and cleans up its temporary files. It requires no AWS credentials.
 
 If you want to refresh the Terraform tables locally:
 

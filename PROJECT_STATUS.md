@@ -34,6 +34,8 @@ What still depends on the adopting team:
 
 ## Recent Improvements
 
+- Updated the automatic workflow actions to Node24 releases pinned by commit
+- Aligned local and GitHub Actions security scans through one Trivy script with isolated temporary caches
 - Repaired workflow syntax and separated automatic validation from manual cloud operations
 - Added Linux provider checksums without upgrading providers
 - Replaced the incompatible tfsec CI parser with a pinned Trivy configuration scan
