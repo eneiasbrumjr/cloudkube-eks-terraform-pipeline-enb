@@ -40,8 +40,23 @@ output "cluster_security_group_id" {
 }
 
 output "node_security_group_id" {
-  description = "The custom security group used as an optional SSH source; it is not automatically attached to managed nodes."
+  description = "The security group explicitly attached to managed nodes by the launch template."
   value       = aws_security_group.eks_nodes.id
+}
+
+output "eks_managed_security_group_id" {
+  description = "The EKS-created control-plane security group. Its rules are outside this module, and the node launch template does not attach this group."
+  value       = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+}
+
+output "node_launch_template_id" {
+  description = "The ID of the launch template used by the managed node group."
+  value       = aws_launch_template.nodes.id
+}
+
+output "node_launch_template_version" {
+  description = "The numeric launch template version selected for the managed node group."
+  value       = aws_launch_template.nodes.latest_version
 }
 
 output "node_group_id" {

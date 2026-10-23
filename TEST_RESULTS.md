@@ -2,6 +2,43 @@
 
 Last reviewed: 2026-10-23
 
+## Effective node egress and private paths - 2026-10-23
+
+This change follows merge commit `49a95bff159816a28d6712480bcb28f1a0d34658`. It attaches only the custom node SG through a launch template, replaces unrestricted custom-group egress with explicit traffic paths, and adds private AWS endpoints. Terraform 1.12.2, AWS provider 5.100.0, TLS provider 4.2.1, the lockfile, the shared scanner, and the manual cloud-operation gates are unchanged.
+
+| Check | Local result |
+| --- | --- |
+| Terraform formatting and `git diff --check` | Passed |
+| Backend-free initialization with the read-only lockfile | Passed using the verified local provider packages |
+| Terraform schema validation | Passed with no configuration errors |
+| Mocked AWS/TLS provider regression suite | **32 passed, 0 failed, 0 skipped**; all runs use `command = plan` |
+| Shared Trivy 0.76.1 scan | Completed; SARIF 2.1.0 with **0 findings at MEDIUM or above** |
+| actionlint 1.7.12 | Passed for the unchanged workflow |
+| terraform-docs 0.17.0 | Generated tables in an isolated copy, including new inputs/outputs and one marker pair |
+
+The suite contains **25 root contract runs, 4 EKS module runs and 3 VPC module runs**. It checks actual resource arguments for LT-to-node-group wiring, exclusive node SG attachment, numeric LT version, AL2023, required metadata tokens, hop limit, encrypted gp3 disk, explicit SG source/destination/port paths, private DNS/endpoints, S3 route-table association and object-read policy, optional network/IAM settings, and no-NAT/single-NAT/per-AZ routing. Negative cases cover endpoint modes, invalid/broad CIDRs, external egress without NAT, SSH input pairs, webhook ports, required IRSA and invalid per-AZ subnet counts.
+
+Fixtures supply only synthetic provider responses and computed identities where needed: distinct SG IDs, a launch-template ID/version, and the S3 prefix-list ID. SG associations, traffic rules, endpoints, metadata and disk settings under assertion come from the source configuration. The final suite completed in approximately 39 seconds without source changes during execution. The initial local run identified one test expectation needing adjustment: rejection of private API access stops Terraform before it evaluates a dependent public-mode validation. The final test expects the blocking private-access rejection actually emitted.
+
+The shared scan changed from **2 CRITICAL AWS-0104 findings to 0 findings at MEDIUM or above**, without ignores or scanner-policy changes. No conclusion is made about excluded severities or every possible input override. The EKS-created primary control-plane SG remains outside this module's rule ownership and is not fully represented by the source scan. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
+
+Commands, after installing the pinned tools:
+
+```sh
+terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+terraform -chdir=infra fmt -check -recursive
+terraform -chdir=infra validate -no-color
+terraform -chdir=infra test -no-color
+actionlint .github/workflows/terraform-eks-pipeline.yml
+bash scripts/scan-terraform.sh /tmp/cloudkube-egress-results.sarif
+```
+
+Local initialization used the existing verified provider cache without copying or changing it. Validation and tests ran with no AWS credentials; provider RPC needed to run outside the local sandbox's socket restriction. Terraform provider mocks validate local configuration but synthesize plan/data responses and do not configure an AWS client. They do not verify real API validation, replacement execution, live SG attachments, node bootstrap, IAM authorization, DNS, image pulls, IRSA/CSI, or SSM.
+
+The independent source review checked SG identities, endpoint paths, creation dependencies, provider-supported LT fields and replacement behavior. The [migration document](NETWORK_SECURITY.md#existing-cluster-migration-and-runtime-validation) requires temporary old/new node communication and endpoint ingress before a private-DNS transition; the S3 policy affects every client of the private route tables. Names permitting replacement overlap do not establish availability.
+
+No AWS authentication, remote backend access, real cloud plan, apply, deployment, or paid resource creation was performed. TFLint and the entire pre-commit suite were not rerun; the shared scan, required Terraform checks, workflow lint and docs generation above are the executed gates. Hosted PR and post-merge results are recorded in the associated pull request and Actions runs.
+
 ## EKS compatibility and network-default validation - 2026-10-23
 
 This change follows merge commit `ea2c671c4a677c9963cefdfca76a99d603bbba9a`. The candidate changes the new-cluster Kubernetes default to 1.36, makes the AL2023 x86_64 node AMI explicit, disables public API access and automatic public-IP assignment by default, and adds blocking endpoint input guards. Terraform runs on 1.12.2 with AWS provider 5.100.0 and TLS provider 4.2.1; provider versions and the dependency lockfile are unchanged. The minimum supported Terraform version is now 1.11 for plan-time provider mocks.

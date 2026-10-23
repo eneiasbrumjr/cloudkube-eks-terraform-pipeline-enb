@@ -1,192 +1,79 @@
-# ------------------------------------------------------------------------------
-# Example Terraform Variables File
-# ------------------------------------------------------------------------------
-# Copy this file to terraform.tfvars and customize the values for your environment
-# cp terraform.tfvars.example terraform.tfvars
-#
-# NOTE: terraform.tfvars is in .gitignore to prevent committing sensitive data
-
-# ------------------------------------------------------------------------------
-# Project Configuration
-# ------------------------------------------------------------------------------
+# New-cluster example. Copy to terraform.tfvars and review before applying.
+# Existing environments require the staged migration in NETWORK_SECURITY.md.
+# No AWS resources are created by the automatic repository checks.
 
 project_name = "cloudkube-eks"
-environment  = "dev"  # Options: dev, staging, production
+environment  = "dev"
 aws_region   = "us-east-1"
-
-# ------------------------------------------------------------------------------
-# VPC Configuration
-# ------------------------------------------------------------------------------
 
 vpc_cidr_block             = "10.0.0.0/16"
 public_subnet_cidr_blocks  = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidr_blocks = ["10.0.3.0/24", "10.0.4.0/24"]
 
-# Keep NAT enabled unless alternative egress or all required VPC endpoints exist.
-# Private EKS API access alone does not provide access to AWS services or registries.
-enable_nat_gateway = true
-
-# High Availability vs. Cost: single NAT Gateway saves ~$32/month
-# Default: true (single NAT) - Change to false for production high availability
+# Private EC2, ECR API, ECR registry and STS endpoints plus S3 are always created.
+# No general internet egress. Each interface service adds a charge per AZ/hour.
+enable_nat_gateway = false
 single_nat_gateway = true
-
-# Security: Enable VPC Flow Logs for network monitoring
-# Cost: ~$0.50/GB ingested to CloudWatch
+# If enabling per-AZ NAT, public/private subnet counts must match.
 enable_vpc_flow_logs = true
 
-# ------------------------------------------------------------------------------
-# EKS Cluster Configuration
-# ------------------------------------------------------------------------------
-
-# Standard-support default reviewed on 2026-10-23; check availability before apply.
-# This is a new-cluster baseline, not a direct upgrade path from an older cluster.
-eks_cluster_version = "1.36"
-
-# Node Group Scaling - Start small, scale as needed
-eks_desired_capacity = 2  # Recommended starting point
-eks_max_size         = 3  # Optimized for cost (reduced from 4)
-eks_min_size         = 1  # Can scale down to 1 during low usage
-
-# Instance Configuration - x86_64 types for the explicit AL2023 node AMI
-# t3.medium: ~$0.0416/hour, t3a.medium: ~$0.0374/hour
+# Reviewed 2026-10-23. Check current regional availability before cloud planning.
+# This is not a direct upgrade path from an older Kubernetes/AL2 cluster.
+eks_cluster_version  = "1.36"
+eks_desired_capacity = 2
+eks_max_size         = 3
+eks_min_size         = 1
+# x86_64 types for AL2023. Root disks are encrypted gp3 in the launch template.
 eks_instance_types = ["t3.medium", "t3a.medium"]
-eks_disk_size      = 20  # Minimum recommended size
+eks_disk_size      = 20
 
-# SSH Access (leave empty to disable SSH access to nodes)
-# Security Best Practice: Use SSM Session Manager instead of SSH
-eks_ssh_key_name = ""
-
-# Security: Enable encryption of Kubernetes secrets with KMS
-# Cost: ~$1/month per key + $0.03 per 10,000 requests
-enable_cluster_encryption = true
-
-# Cluster Endpoint Access: administration needs VPC-connected routing and HTTPS rules.
-cluster_endpoint_public_access  = false
+# Private access is required. Administration needs connectivity, DNS and IAM/RBAC.
 cluster_endpoint_private_access = true
-
-# To opt in to public access, set the flag above to true AND supply your real
-# trusted egress IP/VPN CIDR. Example only: ["203.0.113.10/32"]. Keep private access.
-# Empty is valid while public access is disabled. IPv6 and /0 ranges are rejected.
+cluster_endpoint_public_access  = false
+# Public opt-in additionally requires real trusted IPv4 egress CIDRs.
+# Example documentation address only: ["203.0.113.10/32"]. Never use it as-is.
 cluster_endpoint_public_access_cidrs = []
+# Existing source SGs for private API administration; does not create a VPN/host.
+eks_api_admin_security_group_ids = []
 
-# Control Plane Logging (all types enabled for maximum visibility)
-# Cost: ~$0.50/GB ingested, recommend all types for security
-cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+# Empty by default. Both a key and explicit source SGs are required to enable SSH.
+eks_ssh_key_name                  = ""
+eks_ssh_source_security_group_ids = []
+# Adds SSM/SSM Messages endpoints and IAM. Verify the agent and any S3/log needs.
+eks_enable_ssm = false
 
-# IAM Roles for Service Accounts (IRSA) - No additional cost, highly recommended
+# Extra endpoint suffixes, e.g. ["logs"]. Check service availability and added cost.
+eks_additional_interface_endpoint_services = []
+# Default S3 endpoint policy only permits reading regional ECR image layers.
+# Optional explicit bucket ARNs add GetObject only, not ListBucket or writes.
+# This endpoint policy affects ALL clients using the private route tables.
+eks_s3_read_bucket_arns = []
+
+# Private ECR images are the baseline. Public registries/CDNs need a reviewed path.
+# External TCP 443 needs both explicit CIDRs below AND enable_nat_gateway=true.
+# NAT cannot bypass the more-specific regional S3 gateway route/policy.
+eks_external_https_cidrs = []
+# Control-plane TCP 443/10250 and DNS 53 are included; opt in to other webhook ports.
+eks_control_plane_webhook_ports = []
+
+enable_cluster_encryption = true
+# Required by the installed EBS CSI controller; ordinary pods cannot rely on IMDS.
 enable_irsa = true
-
-# ------------------------------------------------------------------------------
-# Cost Optimization
-# ------------------------------------------------------------------------------
-
-# Spot Instances: 60-90% cost savings vs On-Demand
-# WARNING: Can be interrupted with 2-minute notice
-# Recommended: false for production, true for dev/test
+# Spot capacity is interruptible; review workload availability before enabling.
 enable_spot_instances = false
 
-# ------------------------------------------------------------------------------
-# Monitoring and Observability
-# ------------------------------------------------------------------------------
-
-# CloudWatch Log Group for EKS Control Plane
-create_cloudwatch_log_group = true
-
-# Log Retention: Balance between cost and compliance
-# Default keeps one month of control-plane logs.
-# Options: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, etc.
+cluster_enabled_log_types           = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+create_cloudwatch_log_group         = true
 cloudwatch_log_group_retention_days = 30
-
-# ------------------------------------------------------------------------------
-# Additional Tags
-# ------------------------------------------------------------------------------
 
 additional_tags = {
   Owner      = "DevOps Team"
   CostCenter = "Engineering"
-  Backup     = "true"
 }
 
-# ==============================================================================
-# COST ESTIMATION (us-east-1, monthly)
-# ==============================================================================
-#
-# Based on the default configuration above:
-#
-# EKS Control Plane:                   $72.00/month (fixed)
-# EC2 Instances (2x t3.medium):        ~$60.00/month ($0.0416/hour × 2 × 730 hours)
-# NAT Gateway (1x):                    ~$32.00/month ($0.045/hour × 730 hours)
-# NAT Gateway Data Transfer:           ~$5-20/month (depends on usage)
-# EBS Volumes (2x 20GB gp3):           ~$3.20/month ($0.08/GB × 40GB)
-# KMS Key:                             ~$1.00/month
-# CloudWatch Logs:                     ~$2-10/month (depends on volume)
-# VPC Flow Logs:                       ~$1-5/month (depends on traffic)
-#
-# TOTAL ESTIMATED COST:                $176-203/month
-#
-# ==============================================================================
-# COST OPTIMIZATION STRATEGIES
-# ==============================================================================
-#
-# 1. IMMEDIATE SAVINGS (Development/Testing):
-#    - Review NAT costs; disable only with a tested alternative egress design
-#    - Set enable_spot_instances = true                → Save $36/month (60% off EC2)
-#    - Set cloudwatch_log_group_retention_days = 1     → Save ~$1-3/month
-#    - Reduce cluster_enabled_log_types = ["api"]      → Save ~$1-5/month
-#    - Set eks_min_size = 1, desired = 1               → Save $30/month (1 less node)
-#
-#    TOTAL DEV SAVINGS: ~$100-121/month (57% reduction)
-#    ESTIMATED DEV COST: ~$75-82/month
-#
-# 2. SCHEDULED SCALING (Non-production):
-#    - Scale down to min_size during nights/weekends
-#    - Use AWS Instance Scheduler or Lambda
-#    - POTENTIAL SAVINGS: 30-50% on EC2 costs
-#
-# 3. PRODUCTION OPTIMIZATIONS:
-#    - Use Compute Savings Plans (1-3 year)            → Save 20-40% on EC2
-#    - Enable single_nat_gateway = true cautiously     → Save $32/month
-#    - Use t3a instead of t3 instances                 → Save 10% on EC2
-#    - Right-size based on actual usage
-#    - Implement cluster autoscaler aggressively
-#
-# 4. MONITORING & OPTIMIZATION:
-#    - Enable AWS Cost Explorer
-#    - Set up AWS Budgets with alerts
-#    - Review unused resources monthly
-#    - Consider Reserved Instances for stable workloads
-#
-# ==============================================================================
-# SECURITY BEST PRACTICES (MINIMAL COST IMPACT)
-# ==============================================================================
-#
-# 1. Network Security (Implemented):
-#    ✓ Private subnets for worker nodes
-#    ✓ VPC Flow Logs enabled
-#    ✓ Private API endpoint by default, with blocking guards for public opt-in
-#    ! Security-group egress and managed-node associations need further hardening
-#    ✓ Baseline network ACL associated to all subnets
-#
-# 2. Data Protection (Implemented):
-#    ✓ KMS encryption for secrets
-#    ✓ HTTPS endpoints only
-#
-# 3. Access Control (Implemented):
-#    ✓ IRSA for pod-level permissions
-#    ✓ No SSH keys by default
-#    ✓ SSM policy attached to node IAM role
-#    ✓ Configurable API endpoint access
-#
-# 4. Compliance & Audit (Implemented):
-#    ✓ Control plane logging
-#    ✓ Resource tagging
-#    ✓ Automated advisory security scanning (Trivy)
-#
-# 5. RECOMMENDED ACTIONS:
-#    → Establish private administration connectivity; restrict CIDRs if opting in to public access
-#    → Enable AWS GuardDuty (~$5-10/month)
-#    → Implement Pod Security Standards (free)
-#    → Use AWS Secrets Manager for sensitive data
-#    → Enable AWS Config for compliance tracking
-#
-# ==============================================================================
+# Cost example, not a total quote: 4 interface services x 2 AZs x 730 hours
+# x USD 0.01/endpoint ENI-hour = USD 58.40, if that rate applies in your region.
+# Optional SSM adds 2 services (USD 29.20 under the same assumptions).
+# Add EKS, EC2, EBS, logs, KMS, data processing/transfer and any optional NAT.
+# The S3 gateway endpoint has no endpoint hourly charge. See FINOPS_SECURITY.md
+# and https://aws.amazon.com/privatelink/pricing/ for cost assumptions.

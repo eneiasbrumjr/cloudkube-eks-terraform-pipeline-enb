@@ -83,7 +83,7 @@ terraform-docs .
 
 ## Pull Request Expectations
 
-The tests in `infra/tests` use mocked AWS and TLS providers, and every run uses `command = plan`. They cover endpoint guards, version and AMI choices, and subnet routing without AWS credentials or resource creation. Provider downloads during `init` still require registry access. Mock tests do not establish regional EKS availability, add-on compatibility with real workloads, or deployment readiness.
+The tests in `infra/tests` use mocked AWS and TLS providers, and every run uses `command = plan`. They cover endpoint and network input guards, version/AMI choices, launch-template SG attachments, metadata/storage settings, allowed traffic paths, private endpoints, optional services, and subnet routing without AWS credentials or resource creation. Provider downloads during `init` still require registry access. Mock tests do not establish regional EKS availability, add-on compatibility with real workloads, or deployment readiness.
 
 When adding a test, keep these automatic runs isolated from real provider operations. Cloud integration checks require a separate, deliberately configured environment.
 

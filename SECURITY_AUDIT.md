@@ -2,95 +2,79 @@
 
 Last reviewed: 2026-10-23
 
-This review covers the six findings in the repository's Trivy configuration-scan baseline and the corresponding Terraform changes. It describes source configuration and static validation; it does not establish the state of a deployed AWS account, successful cluster operation, or production readiness.
+This review follows the repository's six-finding Trivy baseline, the earlier endpoint hardening change, and the current work on effective worker-node security-group attachment and egress. It covers source configuration and recorded static checks. It does not establish a deployed account's security state, successful cluster operation, or production readiness.
 
-## Default Configuration Changes
+## Current Configuration Changes
 
-- The Kubernetes API endpoint is private by default: `cluster_endpoint_private_access = true` and `cluster_endpoint_public_access = false`.
-- `cluster_endpoint_public_access_cidrs` defaults to an empty list. Public access requires an explicit opt-in and a non-empty allowlist.
-- Blocking input validation rejects both endpoint modes being disabled, public access without an allowlist, invalid or IPv6 allowlist entries, and IPv4 `/0` entries. Empty allowlists remain valid when public access is disabled. These are deployment input guards; the existing Terraform `check` blocks alone are not enforcement because failed checks produce warnings and continue the operation. See [Terraform validation behavior][terraform-validation].
-- Public subnets no longer assign public IPv4 addresses to instances automatically. Their internet-gateway routes and load-balancer discovery tags remain; managed worker nodes continue to use private subnets.
-- NAT gateways and private-subnet NAT routes remain enabled by default. Private API access does not replace the outbound access required by nodes and workloads.
+- The managed node group's launch template attaches **only the custom node SG**. This addresses the earlier gap where that SG existed but was not attached to managed-node interfaces.
+- The two explicit world-egress rules are replaced with SG, prefix-list, resolver, and optional explicit destination rules. The complete traffic matrix is in [NETWORK_SECURITY.md](NETWORK_SECURITY.md).
+- Four private interface services (`ec2`, `ecr.api`, `ecr.dkr`, `sts`) and a regional S3 gateway endpoint supply the baseline AWS paths. NAT now defaults to false; explicit external HTTPS CIDRs require NAT.
+- Interface endpoints retain AWS's default full-access endpoint policy. IAM remains required; these endpoints do not establish an account or resource data perimeter.
+- The S3 gateway policy permits `s3:GetObject` on the regional ECR layer bucket and optional explicit read buckets. It affects **all clients of the associated private route tables**. Private-runner state writes, SSM output uploads, listing, and other operations need a separately reviewed policy and authorization. The read-bucket input does not grant IAM or writes.
+- Private API access is mandatory. Public access remains an explicit option with restricted IPv4 CIDRs and private access still enabled. Guards reject an empty public allowlist, `/0`, IPv6, and ranges covering the full IPv4 address space.
+- Public subnets retain `map_public_ip_on_launch = false`. Their internet-gateway routes and load-balancer discovery tags remain; automatic addressing and public routing are different settings.
+- The launch template requires IMDSv2 with hop limit 1 and encrypted gp3 storage. IRSA must remain enabled for the installed EBS CSI add-on. SSM is opt-in, including its endpoints and node IAM policy. SSH requires both a key and explicit source SGs.
 
-### Administration of the Private API
+These are Terraform configuration changes. Live attachments, image availability, agent behavior, DNS, and connectivity still require verification. See the [AWS private EKS requirements](https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html).
 
-With public access disabled, `kubectl` must run from the VPC or a connected network, with an allowed security-group path to TCP 443 and appropriate IAM/Kubernetes authorization. Running `aws eks update-kubeconfig` only configures a client; it does not create that network path. The repository does not provision a VPN, administration host, or private runner for this purpose. See [EKS endpoint access][eks-endpoint].
+## Trivy: Measured History and Current Result
 
-For an explicitly chosen public endpoint, use only the administrator's or runner's trusted public IPv4 CIDRs and keep private access enabled for nodes. A restricted public endpoint still represents public access: the bundled `AWS-0040` rule flags public mode, and `AWS-0041` also evaluates whether allowlisted CIDRs are public. A public `/32` can therefore retain findings even though it substantially narrows the reachable sources. The default-configuration scan does not establish the safety of every deployment override.
+The scanner remains pinned to **Trivy 0.76.1**, with its bundled checks, a fresh temporary cache, and MEDIUM/HIGH/CRITICAL reporting. Findings remain advisory. Operational failures, Terraform parsing diagnostics, unreadable reports, and missing SARIF 2.1.0 runs block the check. No finding ignore, suppression, or scanner-policy change was added for this remediation.
 
-## Trivy Findings: Baseline and Observed Result
+The original measured baseline contained **6 findings: 4 CRITICAL and 2 HIGH**. The earlier endpoint/public-subnet hardening reduced that to **2 CRITICAL `AWS-0104` findings**. A fresh local run of the shared scanner on the current configuration completed successfully and produced SARIF with **0 findings at MEDIUM or above**. This is an observed static result, not a live network assessment. See [TEST_RESULTS.md](TEST_RESULTS.md) for the current evidence record.
 
-The scanner is pinned to **Trivy 0.76.1**, uses its bundled checks with a fresh temporary cache, and reports MEDIUM, HIGH, and CRITICAL findings. Findings remain advisory; scanner failures, Terraform parsing errors, unreadable reports, and a missing SARIF 2.1.0 run block the check. No ignore rule or finding suppression was added for this change.
+| Rule | Severity | Original measured count | After earlier endpoint hardening | Current observed count | Source change |
+| --- | --- | ---: | ---: | ---: | --- |
+| [AWS-0040][trivy-0040] | CRITICAL | 1 | 0 | 0 | Public API remains disabled by default. |
+| [AWS-0041][trivy-0041] | CRITICAL | 1 | 0 | 0 | Empty default public allowlist; blocking IPv4 guards. |
+| [AWS-0104][trivy-0104] | CRITICAL | 2 | 2 | 0 | Explicit world-egress rules replaced; node SG attached through the launch template. |
+| [AWS-0164][trivy-0164] | HIGH | 2 | 0 | 0 | Automatic public-subnet IP assignment remains disabled. |
+| **Total** | | **6** | **2** | **0** | **Measured by the configured static scan; limitations remain below.** |
 
-The earlier measured baseline contained **6 findings: 4 CRITICAL and 2 HIGH**. A fresh local scan through the shared script after these changes reported **2 remaining CRITICAL findings**, both `AWS-0104`. It produced a SARIF 2.1.0 report and returned success in advisory mode; no ignore rules or Trivy policy changes were used.
+Rule links are pinned to `trivy-checks` commit `ac85645895ed`, used by [Trivy 0.76.1][trivy-dependency]. `AWS-0104` evaluates unrestricted destination CIDRs independently of ports. TCP 443 to all IPv4 addresses, or splitting unrestricted access into multiple ranges, would not provide the intended destination restriction. This change does neither.
 
-| Rule | Severity | Source configuration | Earlier measured count | Observed count after this change | Disposition |
-| --- | --- | --- | ---: | ---: | --- |
-| [AWS-0040][trivy-0040] | CRITICAL | EKS public endpoint enabled | 1 | 0 | Public endpoint disabled by default; explicit opt-in remains available. |
-| [AWS-0041][trivy-0041] | CRITICAL | Public endpoint allowed `0.0.0.0/0` | 1 | 0 | Empty default allowlist and blocking IPv4 allowlist validation. |
-| [AWS-0104][trivy-0104] | CRITICAL | `cluster_egress` and `nodes_egress` allow all destinations | 2 | 2 | Remain visible pending a review of effective security-group attachments and required traffic. |
-| [AWS-0164][trivy-0164] | HIGH | Two public subnets automatically assign public IPs | 2 | 0 | Automatic public-IP assignment disabled. |
-| **Total** | | | **6** | **2** | Observed in the local static scan; remaining egress findings stay visible. |
+Optional public API access can still trigger `AWS-0040`; `AWS-0041` also evaluates whether allowlisted CIDRs are public, so a public `/32` can retain a finding. The default-input scan does not evaluate every deployment override. **Zero findings does not mean the EKS-managed primary SG has been restricted or that runtime security has been validated.**
 
-The rule links are pinned to `trivy-checks` commit `ac85645895ed`, the dependency used by [Trivy 0.76.1][trivy-dependency]. The `AWS-0104` implementation tests unrestricted destination CIDRs independently of the port range. Replacing all protocols with TCP 443 to `0.0.0.0/0` would therefore retain that finding. Changing destination notation or suppressing the rule would not establish a restricted egress policy.
+## Residual Control-Plane SG Boundary
 
-## Remaining Egress Findings and Security-Group Attachments
+The custom control-plane SG is an **additional** group. The EKS-created primary cluster SG still attaches to control-plane interfaces, and its outbound rules are not exclusively owned by this Terraform configuration. AWS documents its default world-egress rule. Permissions are additive; narrower rules in the additional SG cannot revoke that allowance. See [EKS SG defaults](https://docs.aws.amazon.com/eks/latest/userguide/sec-group-reqs.html) and [SG aggregation](https://docs.aws.amazon.com/vpc/latest/userguide/security-group-rules.html).
 
-The two explicit outbound rules in `infra/modules/eks/main.tf` permit all protocols to `0.0.0.0/0`. They have not been removed or narrowed in this change.
+The launch template changes this relationship on worker nodes: specifying custom SGs prevents EKS from also attaching the primary SG to those nodes. The custom node SG supplies a real attachment boundary, and its ingress rules constrain traffic arriving at nodes. This does **not** establish restricted outbound access for the whole control plane. See [managed-node custom SG behavior](https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html).
 
-The effective network model needs more work than editing these two rules:
+The pinned AWS provider 5.100.0 has no exclusive-rule adoption resource for this arbitrary EKS-created SG. Its `aws_default_security_group` resource concerns the VPC default SG. Managing the primary cluster group requires a separately reviewed ownership and lifecycle approach; no live rule revocation was attempted. Provider evidence: [EC2 resource registrations](https://github.com/hashicorp/terraform-provider-aws/blob/v5.100.0/internal/service/ec2/service_package_gen.go), [default SG resource](https://github.com/hashicorp/terraform-provider-aws/blob/v5.100.0/website/docs/r/default_security_group.html.markdown).
 
-| Security group | Relationship established by this repository |
+## Functional and Security Limits
+
+| Area | Remaining requirement or limit |
 | --- | --- |
-| `aws_security_group.eks_cluster` | Passed to `aws_eks_cluster.main.vpc_config.security_group_ids` as an additional control-plane security group. |
-| `aws_security_group.eks_nodes` | Not attached to managed-node interfaces through a custom launch template. It is referenced as a source security group for optional SSH access and by other rules. Those references do not attach it to nodes. |
-| EKS-created cluster security group | Created by EKS and normally associated with the cluster interfaces and managed nodes. Its rules are not explicitly managed by this Terraform configuration. |
+| Workload isolation | Node self-traffic is allowed. NetworkPolicy, pod security, admission controls, RBAC, and workload IAM remain separate. |
+| DNS | SGs do not filter AmazonProvidedDNS. No Route 53 Resolver DNS Firewall is provisioned. |
+| Images / external services | Default endpoints do not provide general public registry access. Verify private ECR images and first-pull behavior; explicit external HTTPS needs maintained CIDRs and NAT. |
+| IRSA / metadata | Verify regional STS use by resolved add-ons and workloads. Hop limit 1 does not isolate host-network or privileged workloads from node credentials. |
+| S3 / shared clients | Read-only gateway policy can block unrelated private-subnet clients. Backend state, patching, scripts, and logging require explicit action/destination review. NAT does not bypass the gateway route. |
+| Endpoint private DNS | EC2/ECR/STS names resolve to endpoint interfaces for other VPC clients too. The default endpoint SG permits only the new node SG. Existing clients need reviewed access before activating that path. |
+| Administration / logs | SSM, SSH, and private API administration require explicit configuration. Node/pod CloudWatch logging needs an optional `logs` endpoint and suitable software/IAM. |
+| Migration | Existing groups without a custom launch template require replacement. Old/new node SGs need reviewed temporary cross-group rules; old clients also need endpoint ingress before the DNS transition. Lifecycle settings alone do not guarantee availability. |
+| Other infrastructure | Remote state/locking, GitHub OIDC trust, deployment permissions, log-group encryption, and the permissive network ACL were not comprehensively audited here. |
 
-AWS documents that the automatically created cluster security group allows outbound traffic by default, and that additional cluster security groups are not automatically attached to node groups. Rules from multiple groups are combined. Restricting an additional group does not override traffic permitted by another attached group. Consequently, a lower count for the two Terraform rules alone would not demonstrate effective node-egress restriction. See [EKS security-group requirements][eks-security-groups] and [security-group rule behavior][vpc-security-groups].
-
-A follow-up should first choose and implement ownership of the actual node and cluster security groups, then define traffic by service and workload. A custom node launch template changes EKS security-group attachment behavior and requires complete connectivity rules; introducing one is a separate functional change, not a scanner-only edit. See [custom security groups for managed nodes][eks-launch-templates].
-
-Required traffic includes control-plane/node communication, DNS and inter-node traffic, container image pulls, and the AWS APIs used by the cluster and workloads. Preserve the required EKS ports and the application's additional destinations. Do not replace all node egress with only the VPC CIDR: NAT does not change the destination address seen by the originating node's outbound security-group rule.
-
-## Public Subnets and Outbound Connectivity
-
-`map_public_ip_on_launch = false` reduces accidental public addressing of future EC2 launches. It does not convert a public subnet into a private subnet: the route table still routes to the internet gateway. The current node group is already placed in private subnets, so it does not depend on this public-subnet setting. See [subnet addressing attributes][subnet-addressing] and [EKS VPC requirements][eks-network].
-
-The public NAT gateway uses an explicitly allocated Elastic IP and remains in a public subnet. Internet-facing load balancers have their own public addressing and route requests to targets using private IPs. Disabling automatic instance addressing preserves those architectural roles. See [NAT gateways][nat-gateways] and [load-balancer addressing][load-balancers].
-
-**Keep NAT enabled unless an alternative outbound design is implemented and validated.** A private Kubernetes API endpoint alone does not provide access to ECR, S3, STS, EC2, Systems Manager, other AWS APIs, or external registries and application services. Removing internet egress requires the relevant VPC endpoints, routing, DNS, endpoint policies, image availability, and workload-specific connectivity. The repository does not provision that complete replacement. See [EKS clusters with limited internet access][eks-private-clusters].
-
-## Other Controls and Remaining Work
-
-Existing configuration places nodes in private subnets, supports KMS encryption of Kubernetes secrets and IRSA, and can enable control-plane logs and VPC Flow Logs. SSH access is optional. The node role includes the Systems Manager managed policy; that policy alone does not establish an operational administration path.
-
-Before a real deployment, also review remote state and locking, GitHub OIDC trust and deployment permissions, workload IAM and RBAC, Pod Security Standards, network policies, admission controls, and secrets handling. The repository does not provision the GitHub OIDC IAM resources or a workload security baseline. CloudWatch log-group encryption and the permissive network ACL remain outside this hardening change. These items were not comprehensively audited here.
+The [network migration notes](NETWORK_SECURITY.md#existing-cluster-migration-and-runtime-validation) describe endpoint, old/new node, S3, NAT, and SSM dependencies. [FINOPS_SECURITY.md](FINOPS_SECURITY.md) covers endpoint charges and temporary migration capacity.
 
 ## Validation Record
 
-- Historical Trivy baseline: 6 findings at MEDIUM or above, as detailed in the table.
-- Fresh local scan through the shared Trivy script: SARIF 2.1.0, **2 CRITICAL findings**, both `AWS-0104`; exit code 0 reflects advisory mode.
-- `actionlint` passed for the workflow.
-- Formatting, Terraform validation, and mocked-provider test outcomes are recorded separately in [TEST_RESULTS.md](TEST_RESULTS.md). This audit does not infer those outcomes from the scanner result.
-- **TFLint was not run for this hardening review.**
-- No AWS deployment, live security-group inspection, node bootstrap, image-pull, workload, or private-endpoint connectivity test was performed in this review.
+- Historical scans: **6 findings**, then **2 `AWS-0104` CRITICAL findings** after the earlier hardening.
+- Current shared Trivy scan: successful execution, SARIF 2.1.0, **0 findings at MEDIUM or above**; no scanner-policy changes or suppression.
+- Backend-disabled offline initialization with the read-only dependency lockfile: passed.
+- Terraform validation: passed in a sanitized environment.
+- Terraform formatting, all 32 mocked-provider tests, workflow lint and isolated documentation generation passed. Commands and limits are recorded in the current entry of [TEST_RESULTS.md](TEST_RESULTS.md); the full pre-commit/TFLint suite was not rerun.
+- No AWS deployment, live SG inspection, node join, private image pull, IRSA call, EBS provisioning, SSM session, workload, or endpoint-connectivity test was performed.
+- Existing resources need a real plan review and staged migration before any authorized apply. No paid AWS resources were created during this work.
 
-A passing advisory scan is not approval of the remaining findings or proof of runtime security.
+A passing advisory scan does not approve infrastructure or demonstrate runtime security.
 
 ## Responsible Disclosure
 
 Please report security issues privately to `eneiasbrumjr@gmail.com` with the subject `SECURITY`.
 
-[terraform-validation]: https://developer.hashicorp.com/terraform/language/validate
-[eks-endpoint]: https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html
-[eks-security-groups]: https://docs.aws.amazon.com/eks/latest/userguide/sec-group-reqs.html
-[vpc-security-groups]: https://docs.aws.amazon.com/vpc/latest/userguide/security-group-rules.html
-[eks-launch-templates]: https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html
-[subnet-addressing]: https://docs.aws.amazon.com/vpc/latest/userguide/subnet-public-ip.html
-[eks-network]: https://docs.aws.amazon.com/eks/latest/userguide/network-reqs.html
-[nat-gateways]: https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html
-[load-balancers]: https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/how-elastic-load-balancing-works.html
-[eks-private-clusters]: https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html
 [trivy-dependency]: https://github.com/aquasecurity/trivy/blob/v0.76.1/go.mod
 [trivy-0040]: https://github.com/aquasecurity/trivy-checks/blob/ac85645895ed/checks/cloud/aws/eks/no_public_cluster_access.rego
 [trivy-0041]: https://github.com/aquasecurity/trivy-checks/blob/ac85645895ed/checks/cloud/aws/eks/no_public_cluster_access_to_cidr.rego

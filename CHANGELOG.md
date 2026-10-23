@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Effective node egress and private service paths - 2026-10-23
+
+- Attached only the custom node security group through an explicit launch template; removed unrestricted egress from both custom groups and narrowed control-plane-to-node ports.
+- Added private EC2, ECR API, ECR registry and regional STS endpoints, plus an S3 gateway policy limited to ECR layer reads and explicit additional object-read buckets.
+- Added opt-ins for SSM, additional interface services, private API administration sources, specific webhook ports, SSH source groups and external HTTPS destinations.
+- Enforced IMDSv2 with hop limit 1, encrypted gp3 root volumes and propagated instance/volume tags. Selected a numeric launch-template version and a unique managed-node-group name prefix.
+- Made node creation wait for the required endpoints, network rules and IAM attachments; made the EBS CSI add-on wait for its IAM policy attachment.
+- Expanded mocked regression coverage for actual resource wiring, traffic paths, optional resources, no-NAT/per-AZ routing and invalid combinations.
+- Documented the unchanged EKS-managed control-plane SG boundary, private-endpoint costs and existing-environment migration requirements.
+- Breaking defaults: NAT and SSM are off; private API access and IRSA are required; SSH needs explicit source groups. An existing node group is replaced when adopting the custom template/name prefix. The S3 endpoint policy affects all clients of the private route tables.
+- Preserved Terraform/provider versions, lockfile, scanner policies and manual AWS-operation gates. No cloud deployment was performed.
+
 ### EKS compatibility and network defaults - 2026-10-23
 
 - Set the new-cluster Kubernetes default to 1.36 and explicitly selected the AL2023 x86_64 managed-node AMI without upgrading provider versions.

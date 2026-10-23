@@ -12,10 +12,11 @@ This repository is intended as a credible starting point for an EKS foundation, 
 
 - Custom VPC with public and private subnets across multiple availability zones
 - Internet gateway, optional NAT gateways, and subnet tags for Kubernetes load balancers
-- EKS cluster with managed node group in private subnets
+- EKS cluster with a managed node group in private subnets, using an explicit launch template and node security group
+- Private EC2, ECR API, ECR registry and STS endpoints, plus an S3 gateway endpoint for image layers
 - Configurable control plane logging
 - Optional EKS secrets encryption with AWS KMS
-- Optional IAM OIDC provider for IRSA
+- IAM OIDC provider and IRSA for the installed EBS CSI controller
 - Managed EKS add-ons:
   `vpc-cni`, `kube-proxy`, `coredns`, `aws-ebs-csi-driver`
 - VPC Flow Logs to CloudWatch Logs
@@ -37,18 +38,22 @@ Implemented in code:
 
 - Worker nodes run in private subnets
 - Kubernetes API access is private by default; public access requires explicit, restricted IPv4 CIDRs
-- Root input validation rejects disabled access in both modes, public access without CIDRs, malformed CIDRs, IPv6 ranges, and unrestricted `/0` ranges
+- Private API access is required for nodes; public opt-in requires restricted IPv4 CIDRs and rejects `/0` or ranges whose combined size covers the IPv4 address space
 - Public and private subnets disable automatic public IPv4 assignment
 - EKS secrets encryption can be enabled with a dedicated KMS key
-- IRSA can be enabled through an IAM OIDC provider
+- IRSA supplies the EBS CSI controller role; node metadata requires IMDSv2 with hop limit 1
+- The launch template attaches only the custom node security group and encrypts the gp3 root volume
+- Node egress permits the private API, explicit AWS endpoints, the regional S3 prefix list, and internal node/pod traffic; external HTTPS destinations are an empty opt-in list
 - Control plane logs are configurable and sent to CloudWatch Logs
 - VPC Flow Logs can be enabled
-- SSH access to nodes is disabled unless an EC2 key pair is explicitly provided
+- SSH requires both an EC2 key pair and explicit source security group IDs; SSM is a separate opt-in
 
 Important limitations:
 
 - Administration of the private API requires VPC-connected routing, DNS, authorized Kubernetes credentials, and security-group rules allowing HTTPS from the administration host or network. This repository does not provision that access path.
-- Security-group egress remains broad. The custom node security group is an optional SSH source, not a group automatically attached to managed nodes; EKS creates an additional cluster security group. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) before treating these rules as the effective network policy.
+- EKS still creates a primary security group on its control-plane interfaces, whose rules this module does not manage. It is excluded from the node launch template. Restricting the custom control-plane group does not remove permissions from that EKS-managed group. See [NETWORK_SECURITY.md](NETWORK_SECURITY.md) for the exact ownership boundary and traffic matrix.
+- Interface endpoint policies retain AWS defaults; IAM must still authorize API calls. The S3 gateway policy allows only ECR layer reads and explicitly configured additional bucket reads, and affects every client of the associated private route tables.
+- Internal node-to-node traffic is allowed. Workload segmentation and Route 53 Resolver DNS Firewall are separate controls.
 - The repository does not create workload IAM roles beyond the EBS CSI driver role.
 - The custom network ACL is permissive and should not be treated as a hardened network boundary.
 - The backend configuration is only a commented example; production state management must be provisioned separately.
@@ -86,7 +91,7 @@ Important limitations:
 
 ## Quick Start
 
-These defaults target a new cluster. Review the [compatibility and migration notes](COMPATIBILITY.md) before changing an existing environment. Configure remote state and an administration access path before applying.
+These defaults target a new cluster. Review the [compatibility and migration notes](COMPATIBILITY.md) before changing an existing environment: replacement nodes need temporary communication with the old group, and private endpoint DNS changes can affect other VPC clients. Configure remote state and an administration access path before applying. Review [network behavior and costs](NETWORK_SECURITY.md): the default has no general internet egress, and private endpoints incur hourly charges.
 
 ```bash
 git clone https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb.git
@@ -111,10 +116,12 @@ kubectl get nodes
 - The root module defaults to Kubernetes `1.36`, reviewed against the AWS support calendar on 2026-10-23. The managed node group explicitly uses `AL2023_x86_64_STANDARD`; select compatible x86_64 instance types. See [COMPATIBILITY.md](COMPATIBILITY.md) for support dates, provider evidence, and existing-cluster migration limits.
 - The EKS control plane is attached to private subnets only.
 - The managed node group also uses private subnets only.
-- Public subnets retain their internet-gateway route and load-balancer discovery tags. Disabling automatic public IPs does not remove those routes; the NAT gateway continues to use its explicitly allocated Elastic IP.
-- Keep NAT enabled unless a tested alternative supplies the required AWS-service and container-registry access. A private Kubernetes API endpoint alone does not provide those dependencies.
+- Public subnets retain their internet-gateway route and load-balancer discovery tags. No NAT or Elastic IP is created by default.
+- Four interface services are provisioned in every private subnet/AZ, plus an S3 gateway endpoint. Use regional private ECR images; public registries and first-time pull-through cache downloads need additional reviewed connectivity.
+- To allow a required external HTTPS destination, set both `enable_nat_gateway = true` and explicit `eks_external_https_cidrs`. NAT does not bypass security-group or S3 endpoint policy restrictions.
+- `eks_enable_ssm` adds SSM/SSM Messages endpoints and the node IAM attachment. Extra endpoints, private API administration sources, webhook ports and S3 object-read buckets are explicit inputs. See [NETWORK_SECURITY.md](NETWORK_SECURITY.md).
 - For production use, provision remote state first and replace the commented example in `infra/backend.tf`.
-- Review `infra/terraform.tfvars.example` before first apply. Its historical cost estimates have not been refreshed in this compatibility review.
+- Review `infra/terraform.tfvars.example` before first apply. The interface-endpoint hourly component alone is approximately USD 58.40 for four services, two AZs and 730 hours if the regional rate is USD 0.01 per endpoint ENI-hour. This excludes EKS, nodes, storage, data processing and other services; see [FINOPS_SECURITY.md](FINOPS_SECURITY.md).
 
 ## CI/CD
 
@@ -198,6 +205,8 @@ What it does provide is a solid, reviewable EKS infrastructure baseline that can
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+- [NETWORK_SECURITY.md](NETWORK_SECURITY.md)
+- [FINOPS_SECURITY.md](FINOPS_SECURITY.md)
 - [COMPATIBILITY.md](COMPATIBILITY.md)
 - [PROJECT_STATUS.md](PROJECT_STATUS.md)
 - [CHANGELOG.md](CHANGELOG.md)
