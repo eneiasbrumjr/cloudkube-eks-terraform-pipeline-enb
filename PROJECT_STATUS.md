@@ -16,13 +16,13 @@ This repository provides a solid EKS foundation layer:
 
 ## Current Maturity
 
-**Status: infrastructure baseline with locally validated workflow checks; cloud deployment remains unvalidated.**
+**Status: infrastructure baseline with validated GitHub Actions checks; cloud deployment remains unvalidated.**
 
 On 2026-10-23, actionlint accepted the repaired workflow and Terraform formatting and validation passed with the existing provider versions. The Linux runner checksums were added to the dependency lockfile. Trivy generated a SARIF report with six existing configuration findings (four critical, two high), and terraform-docs generated documentation successfully. See [TEST_RESULTS.md](TEST_RESULTS.md) for commands and limits.
 
 Automatic runs perform checks without AWS credentials. Cloud plan and apply require an explicit manual operation on `main` and an initialized S3 backend. The backend remains an unconfigured example, so cloud operations are not ready to run.
 
-Earlier workflow failures are retained in GitHub Actions history. The repaired workflow must also complete on a GitHub-hosted runner before its remote execution can be called validated. No AWS authentication, plan, apply, or deployment was executed during the local review.
+The repaired workflow completed successfully in [GitHub Actions run #12](https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb/actions/runs/40020683358) for [PR #5](https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb/pull/5). Terraform validation, the advisory security scan, and documentation generation passed; manual plan and apply jobs were skipped. Earlier failures remain in the run history. No AWS authentication, plan, apply, or deployment was executed during this repair.
 
 What still depends on the adopting team:
 
