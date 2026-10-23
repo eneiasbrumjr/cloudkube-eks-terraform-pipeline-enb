@@ -19,7 +19,7 @@ This repository is intended as a credible starting point for an EKS foundation, 
 - Managed EKS add-ons:
   `vpc-cni`, `kube-proxy`, `coredns`, `aws-ebs-csi-driver`
 - VPC Flow Logs to CloudWatch Logs
-- GitHub Actions workflow for `fmt`, `validate`, `tfsec`, plan, apply, and terraform-docs updates
+- GitHub Actions workflow for `fmt`, `validate`, Trivy reports, manual plan/apply, and generated documentation
 - Pre-commit, TFLint, and terraform-docs configuration for contributor workflows
 
 ## What It Does Not Include
@@ -106,23 +106,46 @@ kubectl get nodes
 
 ## CI/CD
 
-The GitHub Actions workflow does the following:
+The workflow separates checks that need no AWS credentials from manual cloud operations.
 
-- On pull requests:
-  `terraform fmt -check`, `terraform validate`, `tfsec`, and a Terraform plan for same-repository PRs
-- On pushes to `main`:
-  Terraform plan and apply in `infra/`
-- On same-repository pull requests:
-  terraform-docs updates can be pushed back to the branch
+| Trigger | Behavior |
+| --- | --- |
+| Pull request targeting `main`, or push to `main`, matching the workflow path filters | Format check, backend-free initialization, Terraform validation, advisory security report, and documentation generation |
+| Manual run with `operation: validate` (default) | The same checks, without cloud authentication |
+| Manual run on `main` with `operation: plan` | Checks, AWS authentication, remote-state verification, and Terraform plan |
+| Manual run on `main` with `operation: apply` | Checks, AWS authentication, remote-state verification, plan, and apply through the `production` environment |
 
-Authentication behavior:
+A push or pull request never starts a cloud plan or apply. Format failures, initialization errors, validation errors, and cloud plan errors fail their jobs.
 
-- Preferred:
-  GitHub OIDC with `AWS_ROLE_ARN`
-- Backward-compatible fallback:
-  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+### Reports and generated documentation
 
-The repository does not provision the AWS-side IAM role for GitHub OIDC. That must exist before OIDC-based CI can work.
+- The Trivy configuration scan remains **advisory**: findings at medium severity or above are reported without blocking this infrastructure baseline.
+- Trivy runs after Terraform validation, using a pinned version and its bundled checks. Parsing diagnostics, scanner execution failures, and a missing or invalid SARIF report fail the job. A successful security job does not mean there are no findings.
+- Every scan uploads a `trivy-results` artifact. Push and manual runs also upload SARIF to GitHub Security; pull requests use the artifact without requiring a write-capable token.
+- Validation outcomes and the security finding count appear in the workflow summary.
+- Terraform documentation is generated as a `terraform-documentation` artifact. The workflow does not commit or push generated changes into a branch.
+- Saved Terraform plans remain in the apply runner and are not published as artifacts.
+
+### Manual cloud operations
+
+Before selecting `plan` or `apply` in **Actions > Terraform EKS Pipeline > Run workflow**:
+
+1. Provision durable remote state and configure an S3 backend in `infra/backend.tf`. The workflow requires an initialized S3 backend before planning.
+2. Configure AWS authentication and review the Terraform inputs.
+3. Select `main` and the intended operation. Other branches run the local checks but skip cloud jobs.
+4. Review the `production` environment settings before using `apply`. Required reviewers and deployment protections must be configured separately.
+
+The backend in this repository is a commented example. Cloud operations remain blocked until the backend is configured. The backend check verifies its initialized type, not the bucket's locking, access policy, or recovery configuration.
+
+Authentication retains the existing options:
+
+- Preferred: GitHub OpenID Connect (OIDC), with the `AWS_ROLE_ARN` secret.
+- Compatibility fallback: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets.
+- Region: `AWS_REGION` secret, defaulting to `us-east-1`.
+
+Only the manual cloud jobs receive these settings and request an OIDC token. The repository does not provision the AWS identity resources or remote-state storage.
+
+See [TEST_RESULTS.md](TEST_RESULTS.md) for executed checks and their limits.
 
 ## Local Contributor Workflow
 
