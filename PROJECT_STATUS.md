@@ -16,13 +16,13 @@ This repository provides a solid EKS foundation layer:
 
 ## Current Maturity
 
-**Status: infrastructure baseline; deployment workflow validation pending.**
+**Status: infrastructure baseline with locally validated workflow checks; cloud deployment remains unvalidated.**
 
-Local formatting and `terraform validate` results are recorded in [TEST_RESULTS.md](TEST_RESULTS.md) for 2026-04-13. A [reviewed GitHub Actions run](https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb/actions/runs/24368890165), also dated 2026-04-13, ended in failure.
+On 2026-10-23, actionlint accepted the repaired workflow and Terraform formatting and validation passed with the existing provider versions. The Linux runner checksums were added to the dependency lockfile. Trivy generated a SARIF report with six existing configuration findings (four critical, two high), and terraform-docs generated documentation successfully. See [TEST_RESULTS.md](TEST_RESULTS.md) for commands and limits.
 
-A [documentation-only workflow run on 2026-10-23](https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb/actions/runs/40014596097) also ended in failure, with no jobs created. Workflow validation therefore remains a follow-up task.
+Automatic runs perform checks without AWS credentials. Cloud plan and apply require an explicit manual operation on `main` and an initialized S3 backend. The backend remains an unconfigured example, so cloud operations are not ready to run.
 
-This status was updated through repository inspection on 2026-10-23. No new tests or deployment were executed for this documentation update. The repository is not a complete production platform by itself.
+Earlier workflow failures are retained in GitHub Actions history. The repaired workflow must also complete on a GitHub-hosted runner before its remote execution can be called validated. No AWS authentication, plan, apply, or deployment was executed during the local review.
 
 What still depends on the adopting team:
 
@@ -34,6 +34,11 @@ What still depends on the adopting team:
 
 ## Recent Improvements
 
+- Repaired workflow syntax and separated automatic validation from manual cloud operations
+- Added Linux provider checksums without upgrading providers
+- Replaced the incompatible tfsec CI parser with a pinned Trivy configuration scan
+- Replaced automatic branch writes with run summaries and documentation artifacts
+
 - Corrected Kubernetes discovery tags to use the full EKS cluster name
 - Scoped the cluster control plane to private subnets only
 - Tightened Terraform and provider version constraints
@@ -42,6 +47,9 @@ What still depends on the adopting team:
 - Rewrote the top-level documentation to match implemented behavior
 
 ## Known Gaps
+
+- Kubernetes version compatibility still requires review before deployment
+- Security scan findings remain advisory and require contextual review
 
 - Public endpoint access remains enabled by default for convenience
 - The custom network ACL is permissive

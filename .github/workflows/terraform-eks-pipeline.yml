@@ -7,13 +7,25 @@ on:
     paths:
       - 'infra/**'
       - '.github/workflows/terraform-eks-pipeline.yml'
+      - '.terraform-docs.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'infra/**'
       - '.github/workflows/terraform-eks-pipeline.yml'
+      - '.terraform-docs.yml'
   workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operation to run (plan and apply require AWS and remote state)"
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - plan
+          - apply
 
 # Prevent concurrent executions of the same workflow
 concurrency:
@@ -22,18 +34,20 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
-  id-token: write
+
+defaults:
+  run:
+    shell: bash
 
 env:
   TF_VERSION: "1.12.2"
   TF_IN_AUTOMATION: "true"
-  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
 jobs:
   terraform-validate:
-    name: "Terraform Validate & Lint"
+    name: "Terraform Format & Validate"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ./infra
@@ -41,6 +55,8 @@ jobs:
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@v3
@@ -51,65 +67,142 @@ jobs:
       - name: "Terraform Format Check"
         id: fmt
         run: terraform fmt -check -recursive
-        continue-on-error: true
 
-      - name: "Terraform Init"
+      - name: "Terraform Init Without Backend"
         id: init
-        run: terraform init -backend=false -lockfile=readonly
+        run: terraform init -backend=false -input=false -lockfile=readonly
 
       - name: "Terraform Validate"
         id: validate
         run: terraform validate -no-color
 
-      - name: "Comment PR - Validation Results"
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-
-            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
+      - name: "Summarize Validation"
+        if: always()
+        env:
+          FMT_RESULT: ${{ steps.fmt.outcome }}
+          INIT_RESULT: ${{ steps.init.outcome }}
+          VALIDATE_RESULT: ${{ steps.validate.outcome }}
+        run: |
+          {
+            echo "## Terraform validation"
+            printf '| Check | Result |\n| --- | --- |\n'
+            printf '| Format | %s |\n' "$FMT_RESULT"
+            printf '| Init without backend | %s |\n' "$INIT_RESULT"
+            printf '| Validate | %s |\n' "$VALIDATE_RESULT"
+            echo ""
+            echo "These checks do not authenticate to AWS or execute a Terraform plan or apply."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   terraform-security-scan:
-    name: "Security Scan with tfsec"
+    name: "Security Report (Advisory)"
+    needs: terraform-validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: write
       security-events: write
 
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4
-
-      - name: "Run tfsec"
-        uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          working_directory: infra
-          soft_fail: true
-          format: sarif
-          additional_args: --minimum-severity MEDIUM
+          persist-credentials: false
 
-      - name: "Upload SARIF file"
-        uses: github/codeql-action/upload-sarif@v3
+      - name: "Setup Trivy"
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.76.1
+          cache: "false"
+
+      - name: "Run Trivy Configuration Scan"
+        run: |
+          set +e
+          trivy config --skip-check-update --disable-telemetry \
+            --format sarif --severity MEDIUM,HIGH,CRITICAL --exit-code 0 \
+            --output results.sarif infra 2>trivy.log
+          scan_status=$?
+          set -e
+          cat trivy.log >&2
+          if [ "$scan_status" -ne 0 ]; then
+            exit "$scan_status"
+          fi
+          if grep -Fq '[terraform parser] Error parsing file' trivy.log; then
+            echo "::error::Trivy could not parse a Terraform file. The report is incomplete."
+            exit 1
+          fi
+
+      - name: "Check and Summarize Security Report"
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("results.sarif", encoding="utf-8") as report_file:
+              report = json.load(report_file)
+          if report.get("version") != "2.1.0" or not report.get("runs"):
+              raise SystemExit("Expected a valid SARIF report with at least one run.")
+          count = sum(len(run.get("results", [])) for run in report["runs"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Security scan (advisory)\n\n")
+              summary.write(f"Trivy reported {count} findings at medium severity or above.\n\n")
+              summary.write("Findings do not block this baseline. Review the SARIF report; a successful job does not mean the configuration is free of findings.\n")
+          PY
+
+      - name: "Upload Security Report Artifact"
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: results.sarif
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: "Upload SARIF to GitHub Security"
+        if: ${{ !cancelled() && hashFiles('results.sarif') != '' && github.event_name != 'pull_request' }}
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
+          checkout_path: infra
+
+  terraform-docs:
+    name: "Generate Terraform Documentation"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Generate Terraform Docs"
+        uses: terraform-docs/gh-actions@v1.1.0
+        with:
+          working-dir: infra
+          output-file: ../README.md
+          output-method: inject
+          git-push: "false"
+
+      - name: "Upload Generated README"
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-documentation
+          path: README.md
+          if-no-files-found: error
+          retention-days: 7
 
   terraform-plan:
-    name: "Terraform Plan"
+    name: "Terraform Plan (Manual)"
     runs-on: ubuntu-latest
-    needs: [terraform-validate, terraform-security-scan]
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 30
+    needs: [terraform-validate, terraform-security-scan, terraform-docs]
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'plan' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
     defaults:
       run:
         working-directory: ./infra
@@ -117,17 +210,19 @@ jobs:
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: "Configure AWS Credentials via OIDC"
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
+        if: env.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: GitHubActionsPlan-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: "Configure AWS Credentials via Access Keys"
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+        if: env.AWS_ROLE_ARN == ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -141,66 +236,35 @@ jobs:
           terraform_wrapper: false
 
       - name: "Terraform Init"
-        id: init
-        run: terraform init -lockfile=readonly
+        run: terraform init -input=false -lockfile=readonly
+
+      - name: "Require Initialized S3 Backend"
+        run: |
+          # Backend metadata format for the pinned Terraform 1.12.2.
+          if ! jq -e '.version == 3 and .backend.type == "s3"' \
+            .terraform/terraform.tfstate >/dev/null 2>&1; then
+            echo "::error::Cloud operations require an initialized S3 backend. Configure durable remote state first."
+            exit 1
+          fi
 
       - name: "Terraform Plan"
-        id: plan
-        run: terraform plan -input=false -no-color -out=tfplan
-        continue-on-error: true
-
-      - name: "Save Plan Output"
-        if: steps.plan.outcome == 'success'
-        run: terraform show -no-color tfplan > plan.txt
-
-      - name: "Comment PR - Plan Results"
-        uses: actions/github-script@v7
-        if: always()
-        with:
-          script: |
-            const fs = require('fs');
-            let plan = 'Plan file not found';
-            try {
-              plan = fs.readFileSync('infra/plan.txt', 'utf8');
-            } catch (err) {
-              console.log('Error reading plan file:', err);
-            }
-
-            const output = `#### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-
-            <details><summary>Show Plan</summary>
-
-            \`\`\`terraform
-            ${plan.slice(0, 65000)}
-            \`\`\`
-
-            </details>
-
-            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
-      - name: "Upload Plan Artifact"
-        if: steps.plan.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-plan
-          path: infra/tfplan
-          retention-days: 5
+        run: terraform plan -input=false -no-color
 
   terraform-apply:
-    name: "Terraform Apply"
+    name: "Terraform Apply (Manual)"
     runs-on: ubuntu-latest
-    needs: [terraform-validate, terraform-security-scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 60
+    needs: [terraform-validate, terraform-security-scan, terraform-docs]
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'apply' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: production
       url: https://console.aws.amazon.com/eks/
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
     defaults:
       run:
         working-directory: ./infra
@@ -208,17 +272,19 @@ jobs:
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: "Configure AWS Credentials via OIDC"
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
+        if: env.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: GitHubActionsApply-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: "Configure AWS Credentials via Access Keys"
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+        if: env.AWS_ROLE_ARN == ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -232,45 +298,19 @@ jobs:
           terraform_wrapper: false
 
       - name: "Terraform Init"
-        id: init
-        run: terraform init -lockfile=readonly
+        run: terraform init -input=false -lockfile=readonly
+
+      - name: "Require Initialized S3 Backend"
+        run: |
+          # Backend metadata format for the pinned Terraform 1.12.2.
+          if ! jq -e '.version == 3 and .backend.type == "s3"' \
+            .terraform/terraform.tfstate >/dev/null 2>&1; then
+            echo "::error::Cloud operations require an initialized S3 backend. Configure durable remote state first."
+            exit 1
+          fi
 
       - name: "Terraform Plan"
-        id: plan
         run: terraform plan -input=false -no-color -out=tfplan
 
       - name: "Terraform Apply"
-        id: apply
         run: terraform apply -input=false -auto-approve -no-color tfplan
-
-      - name: "Generate Terraform Docs"
-        uses: terraform-docs/gh-actions@v1.1.0
-        with:
-          working-dir: infra
-          output-file: ../README.md
-          output-method: inject
-          git-push: "true"
-          git-commit-message: "docs: update Terraform documentation [skip ci]"
-
-  terraform-docs-update:
-    name: "Update Terraform Documentation"
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: write
-      pull-requests: write
-
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-
-      - name: "Generate Terraform Docs"
-        uses: terraform-docs/gh-actions@v1.1.0
-        with:
-          working-dir: infra
-          output-file: ../README.md
-          output-method: inject
-          git-push: "true"
-          git-commit-message: "docs: update Terraform documentation"

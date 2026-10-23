@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Workflow repair - 2026-10-23
+
+- Corrected unsupported secret references in workflow conditions.
+- Restricted cloud plan and apply to explicit manual runs on `main`; automatic runs validate without AWS credentials.
+- Made format checks and plan errors blocking.
+- Required initialized S3 state before cloud operations.
+- Replaced tfsec with pinned Trivy after reproducing a parser failure on existing Terraform check blocks; generated and checked SARIF output.
+- Added official Linux provider checksums while preserving AWS 5.100.0 and TLS 4.2.1.
+- Replaced automatic PR comments and documentation commits with summaries and generated-document artifacts.
+- Scoped AWS credentials and token permissions to the jobs that need them.
+
 ### Changed
 - Corrected Kubernetes resource discovery tags to use the actual EKS cluster name.
 - Scoped the EKS control plane to private subnets instead of mixing public and private subnets.

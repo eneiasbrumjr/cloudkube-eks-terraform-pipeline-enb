@@ -259,9 +259,9 @@ kubectl create rolebinding developers --clusterrole=edit --group=developers
    - Custom tags for cost allocation
 
 3. **Configured Security Scanning**
-   - The GitHub Actions workflow includes tfsec and a report-upload step for GitHub Security
-   - tfsec uses `soft_fail: true`, so scanner findings do not fail that step
-   - Successful end-to-end execution remains to be validated; see [PROJECT_STATUS.md](PROJECT_STATUS.md)
+   - The GitHub Actions workflow includes a Trivy configuration scan, a SARIF artifact, and a report-upload step for GitHub Security
+   - Trivy uses `--exit-code 0` for advisory findings; parsing diagnostics and report-generation errors fail the job
+   - The local scan reported six findings (four critical, two high); see [TEST_RESULTS.md](TEST_RESULTS.md). Deployment remains unvalidated.
 
 #### 🔒 Recommended Actions
 
