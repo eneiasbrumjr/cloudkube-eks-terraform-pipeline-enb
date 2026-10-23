@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-04-13
+Last updated: 2026-10-23
 
 ## Current Scope
 
@@ -16,7 +16,11 @@ This repository provides a solid EKS foundation layer:
 
 ## Current Maturity
 
-The repository is suitable as a baseline or portfolio-quality infrastructure example, but it is not a complete production platform by itself.
+**Status: infrastructure baseline; deployment workflow validation pending.**
+
+Local formatting and `terraform validate` results are recorded in [TEST_RESULTS.md](TEST_RESULTS.md) for 2026-04-13. The [latest reviewed GitHub Actions run](https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb/actions/runs/24368890165), also dated 2026-04-13, ended in failure.
+
+This status was updated through repository inspection on 2026-10-23. No new tests or deployment were executed for this documentation update. The repository is not a complete production platform by itself.
 
 What still depends on the adopting team:
 
