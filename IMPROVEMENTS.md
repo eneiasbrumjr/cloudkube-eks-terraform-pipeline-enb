@@ -11,9 +11,11 @@ This file tracks the most important modernization changes that were applied duri
 - Tightened Terraform and provider version constraints
 - Added stronger input validation for CIDRs, scaling values, log types, and tag keys
 - Raised the default CloudWatch log retention to 30 days
-- Updated GitHub Actions to prefer AWS OIDC while keeping access-key fallback
+- Required AWS OIDC for manual cloud jobs, with separate plan/apply roles and explicit account/region checks
 - Isolated automatic checks from manual main-only cloud operations and removed automatic documentation writeback
 - Started tracking `.terraform.lock.hcl` for reproducible provider selection
+- Updated the inactive S3 backend example for native lockfiles and added state/plan/backend-config ignore patterns
+- Documented operator-owned remote state, OIDC trust, migration and recovery without provisioning AWS resources
 - Rewrote README, contributing guidance, security notes, and project status docs to match implemented behavior
 
 ## Intentionally Not Added
@@ -25,8 +27,8 @@ This file tracks the most important modernization changes that were applied duri
 
 ## Remaining Follow-Up
 
-1. Bootstrap remote state.
-2. Enforce GitHub OIDC only after AWS-side IAM is in place.
+1. Bootstrap remote state and verify its locking, access policies, encryption and recovery in an approved environment.
+2. Provision the separate OIDC roles and review their trust/resource policies, then configure GitHub variables and `production` protections. The workflow already requires OIDC and has no static-key fallback.
 3. Complete private administration connectivity and the remaining EKS-managed control-plane SG ownership design; the API is now private by default and managed nodes use an explicit restricted SG.
 4. Split any future workload add-ons into separate modules rather than expanding the base layer indiscriminately.
 
