@@ -1,9 +1,14 @@
 # Terraform
 .terraform/
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 *.tfvars
+*.tfvars.json
+*.tfbackend
 *.tfplan
+*.tfplan.json
+tfplan
+tfplan.json
 .terraform.tfstate.lock.info
 crash.log
 crash.*.log
@@ -11,6 +16,9 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Python helper/test caches
+__pycache__/
 
 # Mac
 .DS_Store

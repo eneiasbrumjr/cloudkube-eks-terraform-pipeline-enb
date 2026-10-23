@@ -10,7 +10,7 @@ The repository defines a VPC, EKS control plane, AL2023 managed nodes, four core
 
 The two custom-group unrestricted-egress rules have been replaced by explicit paths. The current local scan reports zero medium-or-higher findings with unchanged Trivy 0.76.1 policies. This does not attest to runtime security: EKS still creates a separate control-plane SG whose rules the module does not manage. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) and [TEST_RESULTS.md](TEST_RESULTS.md).
 
-Automatic GitHub Actions runs initialize without a backend and use mocked providers. Cloud plan/apply still require an explicit manual operation on main and an initialized S3 backend. The backend remains an unconfigured example. This work has not authenticated to AWS, provisioned resources or performed a deployment.
+Automatic GitHub Actions runs initialize without a backend and use mocked providers plus offline cloud-guard tests. Cloud plan/apply require an explicit manual operation on main, separate OIDC roles in an explicit account/region, and S3 metadata with native locking and encryption. The backend remains an unconfigured example. This work has not authenticated to AWS, provisioned resources or performed a deployment.
 
 ## Recent completed improvements
 
@@ -22,6 +22,8 @@ Automatic GitHub Actions runs initialize without a backend and use mocked provid
 - Added private EC2/ECR/STS and S3 dependencies, with explicit options and cost documentation.
 - Added regression coverage for resource wiring, traffic rules, endpoint options, metadata, volumes and routing.
 - Documented replacement/migration behavior and the remaining EKS-managed control-plane boundary.
+- Removed static-key authentication fallback and added checks for account, region, distinct OIDC roles and initialized backend settings.
+- Updated the commented S3 example for native locking, documented identity/state setup and recovery, and ignored common local state, plan and backend-config files.
 
 ## Prioritized follow-up
 
@@ -29,8 +31,10 @@ Effort is a relative engineering estimate, not a deployment authorization or sch
 
 | Priority | Task | Importance | Effort | Status / acceptance evidence |
 | --- | --- | --- | --- | --- |
-| P1 | Effective node SG attachment, required private egress and regressions | Critical | Medium | Implemented; static checks and mock plans recorded in TEST_RESULTS.md |
-| P1 | Durable remote state, locking/recovery and GitHub OIDC trust | Critical before deployment | Medium | Pending a separate reviewed implementation; current backend is an example |
+| P1 | OIDC-only manual jobs with distinct roles and expected account/region | High | Low | Implemented in the workflow with offline regression checks; AWS trust/permissions remain external |
+| P1 | Modern S3 example, backend guards and protection for local state/plan files | High | Low | Implemented; example stays inactive, with no bucket created or migration performed |
+| P2 | Actionable identity, migration and recovery guidance | High | Low | Added OIDC.md and REMOTE_STATE.md; external settings still require operator review |
+| P1 | Bootstrap durable state and AWS OIDC roles/policies | Critical before deployment | Medium | Pending a separate implementation; includes live locking/recovery checks and GitHub environment protections |
 | P1 | Private administration path and deployment/migration plan | Critical before deployment | Medium | Requirements documented; host/VPN/routing, IAM and RBAC not provisioned |
 | P1 | Adopt and restrict the EKS-managed control-plane SG | High | Medium | Ownership boundary documented; requires an explicit state/adoption design |
 | P1 | AWS integration validation in an approved test environment | High | Medium | Pending: regional versions, node join, DNS, ECR, IRSA/CSI, SG attachments and blocked egress |

@@ -47,6 +47,7 @@ From the repository root:
 
 ```bash
 pre-commit run --all-files
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 ```
 
 To run only the security hook:
@@ -86,6 +87,8 @@ terraform-docs .
 The tests in `infra/tests` use mocked AWS and TLS providers, and every run uses `command = plan`. They cover endpoint and network input guards, version/AMI choices, launch-template SG attachments, metadata/storage settings, allowed traffic paths, private endpoints, optional services, and subnet routing without AWS credentials or resource creation. Provider downloads during `init` still require registry access. Mock tests do not establish regional EKS availability, add-on compatibility with real workloads, or deployment readiness.
 
 When adding a test, keep these automatic runs isolated from real provider operations. Cloud integration checks require a separate, deliberately configured environment.
+
+The cloud-guard suite uses synthetic environment values and backend metadata. It checks that missing or inconsistent identity settings and unsafe backend settings stop the manual path; it makes no AWS calls. Keep its checks before credential acquisition and before plan, respectively. If changing the helper or its tests, preserve their workflow path filters. See [OIDC.md](OIDC.md) and [REMOTE_STATE.md](REMOTE_STATE.md) for the operator setup that remains outside these tests.
 
 A good pull request for this repository should:
 

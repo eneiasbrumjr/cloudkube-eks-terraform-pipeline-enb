@@ -2,6 +2,43 @@
 
 Last reviewed: 2026-10-23
 
+## State and OIDC maintenance - 2026-10-23
+
+This maintenance follows merge commit `45217768fc5ee020e1e3a88088b18460180f9077`. It changes the manual-job identity contract, initialized-backend guard, inactive S3 example, local ignore patterns and operator documentation. Terraform 1.12.2, AWS provider 5.100.0, TLS provider 4.2.1, infrastructure resources, lockfile and scanner policies are unchanged.
+
+| Check | Local result |
+| --- | --- |
+| Terraform formatting and `git diff --check` | Passed |
+| Backend-free init with the read-only lockfile | Passed using the existing verified provider cache |
+| Terraform schema validation | Passed |
+| Existing mocked-provider suite | **32 passed, 0 failed** |
+| Offline cloud-guard suite | **16 passed, 0 failed**, including the exact CI invocation from `infra/` |
+| actionlint 1.7.12 | Passed for the modified workflow |
+| Shared Trivy 0.76.1 scan | Completed; **0 findings at MEDIUM or above** |
+| terraform-docs 0.17.0 | Generated inputs/outputs with one marker pair in an isolated copy |
+| Local ignore patterns | State/backups, variable JSON, backend config and saved plans ignored; provider lockfile, source and example files retained |
+| Independent source review | Confirmed manual/main gates and the order: settings check, OIDC, init, backend check, plan/apply |
+
+The guard's synthetic cases cover required settings, malformed or wrong-account roles, identical roles, workspace selection, missing/invalid metadata, non-S3 backends, encryption/locking booleans, account allowlist, region, bucket/key, and errors that do not print configuration contents. These tests are part of the automatic credential-free job; edits to the guard and its tests match the workflow path filters.
+
+The credentials action is pinned to [v6.3.0 commit `e1253824e5c10ff9df46874f81ed3ec929e19cfd`](https://github.com/aws-actions/configure-aws-credentials/tree/e1253824e5c10ff9df46874f81ed3ec929e19cfd). The tag's Git object resolves directly to that commit, and its supported inputs were checked in `action.yml`. Backend metadata format and S3 field types were checked against the [Terraform 1.12.2 writer](https://github.com/hashicorp/terraform/blob/v1.12.2/internal/command/workdir/backend_state.go) and [S3 schema](https://github.com/hashicorp/terraform/blob/v1.12.2/internal/backend/remote-state/s3/backend.go).
+
+Commands from the repository root, with the pinned tools installed:
+
+```sh
+python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
+terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+terraform -chdir=infra fmt -check -recursive
+terraform -chdir=infra validate -no-color
+terraform -chdir=infra test -no-color
+actionlint .github/workflows/terraform-eks-pipeline.yml
+bash scripts/scan-terraform.sh /tmp/cloudkube-state-oidc-results.sarif
+```
+
+Local Terraform validation and tests ran with AWS credentials/configuration disabled; provider RPC required access outside the local sandbox's socket restriction. The guard uses Python's standard library and no network client. TFLint and the full pre-commit suite were not rerun. Hosted PR and post-merge results are recorded in the associated pull request and Actions runs.
+
+**No AWS authentication, real cloud plan/apply, backend activation, migration, deployment or paid resource creation was performed.** The guard examines local settings and metadata after init; it does not independently verify live bucket ownership/policies, KMS, versioning, locking behavior, role trust/permissions or GitHub environment protections. The complete bootstrap remains pending. See [OIDC.md](OIDC.md) and [REMOTE_STATE.md](REMOTE_STATE.md) for the operator-owned work.
+
 ## Effective node egress and private paths - 2026-10-23
 
 This change follows merge commit `49a95bff159816a28d6712480bcb28f1a0d34658`. It attaches only the custom node SG through a launch template, replaces unrestricted custom-group egress with explicit traffic paths, and adds private AWS endpoints. Terraform 1.12.2, AWS provider 5.100.0, TLS provider 4.2.1, the lockfile, the shared scanner, and the manual cloud-operation gates are unchanged.

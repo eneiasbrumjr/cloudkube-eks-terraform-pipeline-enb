@@ -25,7 +25,7 @@ This repository is intended as a credible starting point for an EKS foundation, 
 
 ## What It Does Not Include
 
-- A remote-state bucket or DynamoDB lock table
+- A remote-state bucket, encryption key, or backend bootstrap
 - Workload add-ons such as AWS Load Balancer Controller, Cluster Autoscaler, ExternalDNS, or Metrics Server
 - Helm releases, Argo CD, Flux, or application deployment manifests
 - Opinionated RBAC, Pod Security Standards, network policies, or admission controllers
@@ -74,7 +74,10 @@ Important limitations:
 │   └── modules
 │       ├── eks
 │       └── vpc
-├── scripts/scan-terraform.sh
+├── scripts
+│   ├── check-cloud-config.py
+│   ├── scan-terraform.sh
+│   └── tests
 ├── .pre-commit-config.yaml
 ├── .terraform-docs.yml
 ├── .tflint.hcl
@@ -120,7 +123,7 @@ kubectl get nodes
 - Four interface services are provisioned in every private subnet/AZ, plus an S3 gateway endpoint. Use regional private ECR images; public registries and first-time pull-through cache downloads need additional reviewed connectivity.
 - To allow a required external HTTPS destination, set both `enable_nat_gateway = true` and explicit `eks_external_https_cidrs`. NAT does not bypass security-group or S3 endpoint policy restrictions.
 - `eks_enable_ssm` adds SSM/SSM Messages endpoints and the node IAM attachment. Extra endpoints, private API administration sources, webhook ports and S3 object-read buckets are explicit inputs. See [NETWORK_SECURITY.md](NETWORK_SECURITY.md).
-- For production use, provision remote state first and replace the commented example in `infra/backend.tf`.
+- For production use, provision remote state first and replace the commented example in `infra/backend.tf`. Follow [REMOTE_STATE.md](REMOTE_STATE.md) for S3 native locking, encryption, scoped permissions, migration and recovery.
 - Review `infra/terraform.tfvars.example` before first apply. The interface-endpoint hourly component alone is approximately USD 58.40 for four services, two AZs and 730 hours if the regional rate is USD 0.01 per endpoint ENI-hour. This excludes EKS, nodes, storage, data processing and other services; see [FINOPS_SECURITY.md](FINOPS_SECURITY.md).
 
 ## CI/CD
@@ -129,7 +132,7 @@ The workflow separates checks that need no AWS credentials from manual cloud ope
 
 | Trigger | Behavior |
 | --- | --- |
-| Pull request targeting `main`, or push to `main`, matching the workflow path filters | Format check, backend-free initialization, Terraform validation, tests with mocked providers, advisory security report, and documentation generation |
+| Pull request targeting `main`, or push to `main`, matching the workflow path filters | Format check, backend-free initialization, Terraform validation, mocked-provider and cloud-guard tests, advisory security report, and documentation generation |
 | Manual run with `operation: validate` (default) | The same checks, without cloud authentication |
 | Manual run on `main` with `operation: plan` | Checks, AWS authentication, remote-state verification, and Terraform plan |
 | Manual run on `main` with `operation: apply` | Checks, AWS authentication, remote-state verification, plan, and apply through the `production` environment |
@@ -149,20 +152,25 @@ A push or pull request never starts a cloud plan or apply. Test runs explicitly 
 
 Before selecting `plan` or `apply` in **Actions > Terraform EKS Pipeline > Run workflow**:
 
-1. Provision durable remote state and configure an S3 backend in `infra/backend.tf`. The workflow requires an initialized S3 backend before planning.
-2. Configure AWS authentication and review the Terraform inputs.
+1. Prepare the existing S3 bucket and encryption key, then activate the complete, reviewed backend configuration in `infra/backend.tf`. Require `encrypt = true`, `use_lockfile = true` and the expected `allowed_account_ids`; see [REMOTE_STATE.md](REMOTE_STATE.md).
+2. Prepare separate AWS IAM roles for plan and apply, review their permissions and exact OIDC trust, and configure the variables listed below. Review Terraform inputs for the same account, region and state key.
 3. Select `main` and the intended operation. Other branches run the local checks but skip cloud jobs.
-4. Review the `production` environment settings before using `apply`. Required reviewers and deployment protections must be configured separately.
+4. Configure required reviewers and deployment branch restrictions for the `production` environment before using `apply`. Merely naming that environment in YAML does not create those protections. Its approval precedes the plan generated inside the apply job; it is not approval of that exact saved plan.
 
-The backend in this repository is a commented example. Cloud operations remain blocked until the backend is configured. The backend check verifies its initialized type, not the bucket's locking, access policy, or recovery configuration.
+The backend remains a commented example. Cloud operations remain blocked until identity and backend configuration are supplied. Before requesting AWS credentials, the workflow checks the required account, region and two distinct role ARNs. After initialization, it checks S3 metadata, native locking, encryption, the expected account and region, a non-empty bucket/key, and the `default` workspace. These local checks do not verify bucket ownership, actual bucket/KMS policies, versioning, recovery or effective AWS permissions.
 
-Authentication retains the existing options:
+Authentication is **OpenID Connect (OIDC) only**. Configure these GitHub Actions **variables**, not access-key secrets:
 
-- Preferred: GitHub OpenID Connect (OIDC), with the `AWS_ROLE_ARN` secret.
-- Compatibility fallback: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets.
-- Region: `AWS_REGION` secret, defaulting to `us-east-1`.
+| Variable | Required value |
+| --- | --- |
+| `AWS_ACCOUNT_ID` | Intended AWS account, exactly 12 digits |
+| `AWS_REGION` | Explicit region for the backend and Terraform provider; no default fallback |
+| `AWS_PLAN_ROLE_ARN` | IAM role in that account, authorized for plan and lockfile operations |
+| `AWS_APPLY_ROLE_ARN` | A different IAM role in that account, authorized for reviewed infrastructure changes |
 
-Only the manual cloud jobs receive these settings and request an OIDC token. The repository does not provision the AWS identity resources or remote-state storage.
+Set repository variables so both jobs can validate the role pair. Review any `production` environment overrides against the same account and role contract. The provider receives `TF_VAR_aws_region` from the selected region. The credentials action is pinned by commit and checks the assumed account. Existing `AWS_ROLE_ARN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and secret-scoped `AWS_REGION` settings are no longer consumed by these jobs.
+
+Only manual cloud jobs request an OIDC token. The AWS OIDC provider, role trust and resource policies still need operator setup; [OIDC.md](OIDC.md) documents exact subjects, repository IDs and branch/environment conditions. This repository update does not provision those resources or enable a deployment.
 
 See [TEST_RESULTS.md](TEST_RESULTS.md) for executed checks and their limits.
 
@@ -173,6 +181,7 @@ Install the local tools described in [CONTRIBUTING.md](CONTRIBUTING.md), includi
 ```bash
 pre-commit install
 terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 pre-commit run --all-files
 cd infra
 terraform fmt -recursive
@@ -208,6 +217,8 @@ What it does provide is a solid, reviewable EKS infrastructure baseline that can
 - [NETWORK_SECURITY.md](NETWORK_SECURITY.md)
 - [FINOPS_SECURITY.md](FINOPS_SECURITY.md)
 - [COMPATIBILITY.md](COMPATIBILITY.md)
+- [REMOTE_STATE.md](REMOTE_STATE.md)
+- [OIDC.md](OIDC.md)
 - [PROJECT_STATUS.md](PROJECT_STATUS.md)
 - [CHANGELOG.md](CHANGELOG.md)
 

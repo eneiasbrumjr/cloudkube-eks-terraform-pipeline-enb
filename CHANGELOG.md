@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### State and OIDC maintenance - 2026-10-23
+
+- Required OpenID Connect for manual AWS jobs and removed long-lived access-key fallback. Pinned the credentials action to a reviewed release commit.
+- Required an explicit account/region and distinct plan/apply role ARNs before requesting credentials; aligned the Terraform provider region with that selection.
+- Strengthened initialized S3 metadata checks for native lockfiles, encryption, account, region and the default workspace, with offline regression coverage.
+- Updated the fully commented backend example to native S3 locking and documented operator-owned identity, migration and recovery setup.
+- Ignored common local state backup, variable JSON, backend-config and saved-plan files, including the workflow's bare `tfplan` filename.
+- Breaking workflow configuration: use GitHub Actions variables `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_PLAN_ROLE_ARN` and `AWS_APPLY_ROLE_ARN`; the previous role/access-key secrets are no longer read.
+- Preserved manual/main-only execution and the `production` environment. No AWS resources, backend activation, state migration or deployment were performed; full bootstrap remains separate work.
+
 ### Effective node egress and private service paths - 2026-10-23
 
 - Attached only the custom node security group through an explicit launch template; removed unrestricted egress from both custom groups and narrowed control-plane-to-node ports.

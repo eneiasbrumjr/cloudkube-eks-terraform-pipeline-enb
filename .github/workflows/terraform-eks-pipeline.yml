@@ -9,6 +9,8 @@ on:
       - '.github/workflows/terraform-eks-pipeline.yml'
       - '.terraform-docs.yml'
       - 'scripts/scan-terraform.sh'
+      - 'scripts/check-cloud-config.py'
+      - 'scripts/tests/**'
   pull_request:
     branches:
       - main
@@ -17,6 +19,8 @@ on:
       - '.github/workflows/terraform-eks-pipeline.yml'
       - '.terraform-docs.yml'
       - 'scripts/scan-terraform.sh'
+      - 'scripts/check-cloud-config.py'
+      - 'scripts/tests/**'
   workflow_dispatch:
     inputs:
       operation:
@@ -60,6 +64,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: "Test Local Cloud Configuration Guard"
+        id: cloud_config_test
+        run: python3 -B -m unittest discover -s ../scripts/tests -p 'test_*.py'
+
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -91,6 +99,7 @@ jobs:
           INIT_RESULT: ${{ steps.init.outcome }}
           VALIDATE_RESULT: ${{ steps.validate.outcome }}
           TEST_RESULT: ${{ steps.test.outcome }}
+          CLOUD_CONFIG_TEST_RESULT: ${{ steps.cloud_config_test.outcome }}
         run: |
           {
             echo "## Terraform validation"
@@ -99,6 +108,7 @@ jobs:
             printf '| Init without backend | %s |\n' "$INIT_RESULT"
             printf '| Validate | %s |\n' "$VALIDATE_RESULT"
             printf '| Tests with mocked providers | %s |\n' "$TEST_RESULT"
+            printf '| Local cloud configuration guard tests | %s |\n' "$CLOUD_CONFIG_TEST_RESULT"
             echo ""
             echo "Test plans use mocked AWS and TLS providers. These checks do not authenticate to AWS, plan against a cloud account, or apply resources."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -180,8 +190,13 @@ jobs:
       contents: read
       id-token: write
     env:
-      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_PLAN_ROLE_ARN: ${{ vars.AWS_PLAN_ROLE_ARN }}
+      AWS_APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      AWS_EC2_METADATA_DISABLED: "true"
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_WORKSPACE: default
     defaults:
       run:
         working-directory: ./infra
@@ -192,21 +207,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: "Configure AWS Credentials via OIDC"
-        if: env.AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: "Check Explicit Cloud Settings"
+        run: python3 ../scripts/check-cloud-config.py
+
+      - name: "Configure AWS Plan Role via OIDC"
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_PLAN_ROLE_ARN }}
           role-session-name: GitHubActionsPlan-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: "Configure AWS Credentials via Access Keys"
-        if: env.AWS_ROLE_ARN == ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+          allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
+          unset-current-credentials: true
+          use-existing-credentials: false
+          translate-env-variables: false
 
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -217,14 +231,8 @@ jobs:
       - name: "Terraform Init"
         run: terraform init -input=false -lockfile=readonly
 
-      - name: "Require Initialized S3 Backend"
-        run: |
-          # Backend metadata format for the pinned Terraform 1.12.2.
-          if ! jq -e '.version == 3 and .backend.type == "s3"' \
-            .terraform/terraform.tfstate >/dev/null 2>&1; then
-            echo "::error::Cloud operations require an initialized S3 backend. Configure durable remote state first."
-            exit 1
-          fi
+      - name: "Require S3 Locking and Encryption"
+        run: python3 ../scripts/check-cloud-config.py --backend-metadata .terraform/terraform.tfstate
 
       - name: "Terraform Plan"
         run: terraform plan -input=false -no-color
@@ -242,8 +250,13 @@ jobs:
       name: production
       url: https://console.aws.amazon.com/eks/
     env:
-      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_PLAN_ROLE_ARN: ${{ vars.AWS_PLAN_ROLE_ARN }}
+      AWS_APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      AWS_EC2_METADATA_DISABLED: "true"
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_WORKSPACE: default
     defaults:
       run:
         working-directory: ./infra
@@ -254,21 +267,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: "Configure AWS Credentials via OIDC"
-        if: env.AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: "Check Explicit Cloud Settings"
+        run: python3 ../scripts/check-cloud-config.py
+
+      - name: "Configure AWS Apply Role via OIDC"
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_APPLY_ROLE_ARN }}
           role-session-name: GitHubActionsApply-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: "Configure AWS Credentials via Access Keys"
-        if: env.AWS_ROLE_ARN == ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+          allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
+          unset-current-credentials: true
+          use-existing-credentials: false
+          translate-env-variables: false
 
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -279,14 +291,8 @@ jobs:
       - name: "Terraform Init"
         run: terraform init -input=false -lockfile=readonly
 
-      - name: "Require Initialized S3 Backend"
-        run: |
-          # Backend metadata format for the pinned Terraform 1.12.2.
-          if ! jq -e '.version == 3 and .backend.type == "s3"' \
-            .terraform/terraform.tfstate >/dev/null 2>&1; then
-            echo "::error::Cloud operations require an initialized S3 backend. Configure durable remote state first."
-            exit 1
-          fi
+      - name: "Require S3 Locking and Encryption"
+        run: python3 ../scripts/check-cloud-config.py --backend-metadata .terraform/terraform.tfstate
 
       - name: "Terraform Plan"
         run: terraform plan -input=false -no-color -out=tfplan
