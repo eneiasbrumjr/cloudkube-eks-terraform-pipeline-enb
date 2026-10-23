@@ -2,7 +2,9 @@
 
 ## 💰 Cost Optimization (FinOps)
 
-### Current Configuration Costs (Monthly Estimate - us-east-1)
+### Illustrative Monthly Estimates (us-east-1)
+
+The figures below are historical planning examples and were not recalculated during the documentation review on 2026-10-23. Recalculate them for the intended configuration and current AWS pricing before using them as a budget.
 
 | Component | Configuration | Monthly Cost | Notes |
 |-----------|--------------|--------------|-------|
@@ -61,7 +63,7 @@ eks_instance_types = ["t3a.medium", "t3a.large"]  # Save 10% vs t3
 # 3. Reasonable log retention
 cloudwatch_log_group_retention_days = 30  # Balance cost vs compliance
 
-# 4. Enable auto-scaling
+# 4. Set managed node group size bounds
 eks_min_size         = 2  # For HA
 eks_desired_capacity = 2
 eks_max_size         = 5
@@ -83,11 +85,10 @@ eks_max_size         = 5
 ```
 
 #### 2. Kubernetes Cluster Autoscaler
-```yaml
-# Already configured in the infrastructure
-# Automatically scales nodes based on pod requirements
-# Prevents over-provisioning
-```
+
+Cluster Autoscaler is not deployed by this repository. The managed node group exposes minimum, desired, and maximum node counts, but these settings alone do not implement node scaling in response to pod scheduling demand.
+
+Cluster Autoscaler remains a possible future enhancement.
 
 #### 3. Right-Sizing
 ```bash
@@ -257,10 +258,10 @@ kubectl create rolebinding developers --clusterrole=edit --group=developers
    - Environment, Project, ManagedBy tags
    - Custom tags for cost allocation
 
-3. **Automated Security Scanning**
-   - tfsec in CI/CD pipeline
-   - SARIF reports uploaded to GitHub Security
-   - Blocks on critical security issues
+3. **Configured Security Scanning**
+   - The GitHub Actions workflow includes tfsec and a report-upload step for GitHub Security
+   - tfsec uses `soft_fail: true`, so scanner findings do not fail that step
+   - Successful end-to-end execution remains to be validated; see [PROJECT_STATUS.md](PROJECT_STATUS.md)
 
 #### 🔒 Recommended Actions
 
