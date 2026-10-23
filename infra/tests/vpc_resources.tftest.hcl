@@ -9,6 +9,14 @@ mock_provider "tls" {
   source          = "./tests/mocks/tls"
 }
 
+variables {
+  project_name               = "mock-cloudkube"
+  environment                = "dev"
+  vpc_cidr_block             = "10.42.0.0/16"
+  public_subnet_cidr_blocks  = ["10.42.1.0/24", "10.42.2.0/24"]
+  private_subnet_cidr_blocks = ["10.42.3.0/24", "10.42.4.0/24"]
+}
+
 run "subnets_never_auto_assign_public_ips" {
   command = plan
 
@@ -17,13 +25,8 @@ run "subnets_never_auto_assign_public_ips" {
   }
 
   variables {
-    project_name               = "mock-cloudkube"
-    environment                = "dev"
-    vpc_cidr_block             = "10.42.0.0/16"
-    public_subnet_cidr_blocks  = ["10.42.1.0/24", "10.42.2.0/24"]
-    private_subnet_cidr_blocks = ["10.42.3.0/24", "10.42.4.0/24"]
-    enable_nat_gateway         = true
-    single_nat_gateway         = true
+    enable_nat_gateway = true
+    single_nat_gateway = true
   }
 
   # Distinct computed IDs make wiring assertions decidable during a mock plan.
@@ -149,5 +152,107 @@ run "subnets_never_auto_assign_public_ips" {
       ])
     )
     error_message = "Private subnets must retain default routes through the shared NAT gateway and their route-table associations."
+  }
+}
+
+run "private_routes_without_nat_by_default" {
+  command = plan
+
+  module {
+    source = "./modules/vpc"
+  }
+
+  # The provider computes an omitted route set. Supplying only IDs lets the mock
+  # resolve that empty set while preserving any routes explicitly configured.
+  override_resource {
+    target          = aws_route_table.private[0]
+    override_during = plan
+    values          = { id = "rtb-00000000000000002" }
+  }
+
+  override_resource {
+    target          = aws_route_table.private[1]
+    override_during = plan
+    values          = { id = "rtb-00000000000000003" }
+  }
+
+  assert {
+    condition = (
+      !var.enable_nat_gateway &&
+      length(aws_eip.nat) == 0 && length(aws_nat_gateway.main) == 0 &&
+      length(aws_route_table.private) == 2 &&
+      alltrue([for table in aws_route_table.private : length(table.route) == 0])
+    )
+    error_message = "The default private-subnet network must create neither NAT/EIP resources nor configured internet default routes."
+  }
+}
+
+run "per_az_nat_routes_to_matching_public_subnets" {
+  command = plan
+
+  module {
+    source = "./modules/vpc"
+  }
+
+  variables {
+    enable_nat_gateway = true
+    single_nat_gateway = false
+  }
+
+  override_resource {
+    target          = aws_subnet.public[0]
+    override_during = plan
+    values          = { id = "subnet-00000000000000001" }
+  }
+
+  override_resource {
+    target          = aws_subnet.public[1]
+    override_during = plan
+    values          = { id = "subnet-00000000000000002" }
+  }
+
+  override_resource {
+    target          = aws_eip.nat[0]
+    override_during = plan
+    values          = { id = "eipalloc-00000000000000001" }
+  }
+
+  override_resource {
+    target          = aws_eip.nat[1]
+    override_during = plan
+    values          = { id = "eipalloc-00000000000000002" }
+  }
+
+  override_resource {
+    target          = aws_nat_gateway.main[0]
+    override_during = plan
+    values          = { id = "nat-00000000000000001" }
+  }
+
+  override_resource {
+    target          = aws_nat_gateway.main[1]
+    override_during = plan
+    values          = { id = "nat-00000000000000002" }
+  }
+
+  assert {
+    condition = (
+      length(aws_eip.nat) == 2 && length(aws_nat_gateway.main) == 2 &&
+      alltrue([
+        for index, gateway in aws_nat_gateway.main :
+        gateway.allocation_id == aws_eip.nat[index].id &&
+        gateway.subnet_id == aws_subnet.public[index].id &&
+        aws_subnet.public[index].availability_zone == aws_subnet.private[index].availability_zone
+      ]) &&
+      length(aws_route_table.private) == 2 &&
+      alltrue([
+        for index, table in aws_route_table.private :
+        length(table.route) == 1 && alltrue([
+          for route in table.route :
+          route.cidr_block == "0.0.0.0/0" && route.nat_gateway_id == aws_nat_gateway.main[index].id
+        ])
+      ])
+    )
+    error_message = "Per-AZ NAT must provision one EIP/gateway per public subnet and route each private subnet through the NAT in its own AZ."
   }
 }

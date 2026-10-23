@@ -1,7 +1,7 @@
 # Synthetic provider responses only. Values under test stay in the real modules.
 mock_data "aws_availability_zones" {
   defaults = {
-    names = ["us-east-1a", "us-east-1b"]
+    names = ["us-east-1a", "us-east-1b", "us-east-1c"]
   }
 }
 

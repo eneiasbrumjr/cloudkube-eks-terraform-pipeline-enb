@@ -203,8 +203,15 @@ resource "aws_iam_role_policy_attachment" "ec2_container_registry_read_only" {
 }
 
 resource "aws_iam_role_policy_attachment" "eks_ssm_managed_instance_core" {
+  count = var.enable_ssm ? 1 : 0
+
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   role       = aws_iam_role.eks_nodes.name
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.eks_ssm_managed_instance_core
+  to   = aws_iam_role_policy_attachment.eks_ssm_managed_instance_core[0]
 }
 
 # ------------------------------------------------------------------------------
@@ -212,11 +219,11 @@ resource "aws_iam_role_policy_attachment" "eks_ssm_managed_instance_core" {
 # ------------------------------------------------------------------------------
 
 resource "aws_eks_node_group" "main" {
-  cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${local.cluster_name}-node-group"
-  node_role_arn   = aws_iam_role.eks_nodes.arn
-  subnet_ids      = var.private_subnet_ids
-  version         = var.eks_cluster_version
+  cluster_name           = aws_eks_cluster.main.name
+  node_group_name_prefix = "${substr(local.cluster_name, 0, 32)}-ng-"
+  node_role_arn          = aws_iam_role.eks_nodes.arn
+  subnet_ids             = var.private_subnet_ids
+  version                = var.eks_cluster_version
 
   scaling_config {
     desired_size = var.eks_desired_capacity
@@ -231,16 +238,11 @@ resource "aws_eks_node_group" "main" {
   instance_types = var.eks_instance_types
   # AL2 images are unavailable for Kubernetes 1.33 and newer.
   ami_type      = "AL2023_x86_64_STANDARD"
-  disk_size     = var.eks_disk_size
   capacity_type = var.enable_spot_instances ? "SPOT" : "ON_DEMAND"
 
-  # Enable SSH access only if key is provided
-  dynamic "remote_access" {
-    for_each = var.eks_ssh_key_name != "" ? [1] : []
-    content {
-      ec2_ssh_key               = var.eks_ssh_key_name
-      source_security_group_ids = [aws_security_group.eks_nodes.id]
-    }
+  launch_template {
+    id      = aws_launch_template.nodes.id
+    version = tostring(aws_launch_template.nodes.latest_version)
   }
 
   labels = {
@@ -260,109 +262,35 @@ resource "aws_eks_node_group" "main" {
     aws_iam_role_policy_attachment.eks_worker_node_policy,
     aws_iam_role_policy_attachment.eks_cni_policy,
     aws_iam_role_policy_attachment.ec2_container_registry_read_only,
+    aws_iam_role_policy_attachment.eks_ssm_managed_instance_core,
+    aws_security_group_rule.cluster_egress,
+    aws_security_group_rule.cluster_egress_https,
+    aws_security_group_rule.cluster_egress_dns,
+    aws_security_group_rule.cluster_ingress_nodes,
+    aws_security_group_rule.nodes_egress,
+    aws_security_group_rule.nodes_egress_cluster,
+    aws_security_group_rule.nodes_egress_self,
+    aws_security_group_rule.nodes_egress_s3,
+    aws_security_group_rule.nodes_egress_dns,
+    aws_security_group_rule.nodes_ingress_self,
+    aws_security_group_rule.nodes_ingress_cluster,
+    aws_security_group_rule.nodes_ingress_cluster_https,
+    aws_security_group_rule.nodes_ingress_cluster_dns,
+    aws_security_group_rule.endpoints_ingress_nodes,
+    aws_security_group_rule.cluster_egress_webhooks,
+    aws_security_group_rule.nodes_ingress_webhooks,
+    aws_security_group_rule.nodes_egress_external,
+    aws_security_group_rule.nodes_ingress_ssh,
+    aws_vpc_endpoint.interface,
+    aws_vpc_endpoint.s3,
   ]
 
-  # Ensure node group is replaced before destroy to maintain availability
+  # Unique names permit replacement overlap. Existing workloads still need a
+  # reviewed migration, capacity checks, and controlled draining.
   lifecycle {
     create_before_destroy = true
     ignore_changes        = [scaling_config[0].desired_size]
   }
-}
-
-# ------------------------------------------------------------------------------
-# Security Groups
-# ------------------------------------------------------------------------------
-
-# This supplements the cluster security group created and managed by EKS.
-resource "aws_security_group" "eks_cluster" {
-  name        = "${var.project_name}-${var.environment}-cluster-sg"
-  description = "Security group for the EKS cluster control plane"
-  vpc_id      = var.vpc_id
-
-  tags = merge(
-    {
-      Name        = "${var.project_name}-${var.environment}-cluster-sg"
-      Environment = var.environment
-    },
-    var.additional_tags
-  )
-}
-
-resource "aws_security_group_rule" "cluster_egress" {
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.eks_cluster.id
-  description       = "Allow all outbound traffic"
-}
-
-resource "aws_security_group_rule" "cluster_ingress_nodes" {
-  type                     = "ingress"
-  from_port                = 443
-  to_port                  = 443
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.eks_cluster.id
-  source_security_group_id = aws_security_group.eks_nodes.id
-  description              = "Allow nodes to communicate with the cluster API"
-}
-
-# This group is referenced by the optional SSH source rule. No launch template
-# attaches it to managed nodes; do not treat these rules as their effective policy.
-resource "aws_security_group" "eks_nodes" {
-  name        = "${var.project_name}-${var.environment}-node-sg"
-  description = "Security group for EKS worker nodes"
-  vpc_id      = var.vpc_id
-
-  tags = merge(
-    {
-      Name                                          = "${var.project_name}-${var.environment}-node-sg"
-      Environment                                   = var.environment
-      "kubernetes.io/cluster/${local.cluster_name}" = "owned"
-    },
-    var.additional_tags
-  )
-}
-
-resource "aws_security_group_rule" "nodes_egress" {
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.eks_nodes.id
-  description       = "Allow all outbound traffic"
-}
-
-resource "aws_security_group_rule" "nodes_ingress_self" {
-  type              = "ingress"
-  from_port         = 0
-  to_port           = 65535
-  protocol          = "-1"
-  security_group_id = aws_security_group.eks_nodes.id
-  self              = true
-  description       = "Allow nodes to communicate with each other"
-}
-
-resource "aws_security_group_rule" "nodes_ingress_cluster" {
-  type                     = "ingress"
-  from_port                = 1025
-  to_port                  = 65535
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.eks_nodes.id
-  source_security_group_id = aws_security_group.eks_cluster.id
-  description              = "Allow cluster control plane to communicate with nodes"
-}
-
-resource "aws_security_group_rule" "nodes_ingress_cluster_https" {
-  type                     = "ingress"
-  from_port                = 443
-  to_port                  = 443
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.eks_nodes.id
-  source_security_group_id = aws_security_group.eks_cluster.id
-  description              = "Allow pods to communicate with the cluster API"
 }
 
 # ------------------------------------------------------------------------------
@@ -435,7 +363,10 @@ resource "aws_eks_addon" "ebs_csi_driver" {
     var.additional_tags
   )
 
-  depends_on = [aws_eks_node_group.main]
+  depends_on = [
+    aws_eks_node_group.main,
+    aws_iam_role_policy_attachment.ebs_csi_driver,
+  ]
 }
 
 # ------------------------------------------------------------------------------
