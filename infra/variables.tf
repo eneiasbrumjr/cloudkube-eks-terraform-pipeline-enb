@@ -104,13 +104,13 @@ variable "enable_vpc_flow_logs" {
 # ------------------------------------------------------------------------------
 
 variable "eks_cluster_version" {
-  description = "The Kubernetes version for the EKS cluster."
+  description = "Kubernetes minor version for the cluster and nodes. Availability reviewed on 2026-10-23; older allowed versions can incur extended-support charges."
   type        = string
-  default     = "1.29"
+  default     = "1.36"
 
   validation {
-    condition     = contains(["1.29", "1.30", "1.31", "1.32", "1.33"], var.eks_cluster_version)
-    error_message = "EKS cluster version must be one of the explicitly supported Kubernetes minor versions."
+    condition     = contains(["1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37"], var.eks_cluster_version)
+    error_message = "Select an EKS minor version available on 2026-10-23: 1.31 through 1.37. Prefer standard support (1.34 through 1.37); review current regional availability before deployment."
   }
 }
 
@@ -148,7 +148,7 @@ variable "eks_min_size" {
 }
 
 variable "eks_instance_types" {
-  description = "The EC2 instance types for the EKS nodes. Multiple types enable mixed instance policies."
+  description = "The x86_64 EC2 instance types for the AL2023 EKS nodes. Multiple types enable mixed instance policies."
   type        = list(string)
   default     = ["t3.medium", "t3a.medium"]
 
@@ -182,26 +182,31 @@ variable "enable_cluster_encryption" {
 }
 
 variable "cluster_endpoint_public_access" {
-  description = "Enable public access to the cluster endpoint. Set to false for private clusters."
+  description = "Opt in to public API access with explicit, restricted IPv4 CIDRs. Private access is enabled by default."
   type        = bool
-  default     = true
-}
-
-variable "cluster_endpoint_public_access_cidrs" {
-  description = "List of CIDR blocks that can access the public API endpoint. Restrict to your IP for better security."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = false
 
   validation {
-    condition = alltrue([
-      for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0))
-    ])
-    error_message = "Cluster endpoint public access CIDRs must be valid IPv4 CIDR blocks."
+    condition     = var.cluster_endpoint_public_access || var.cluster_endpoint_private_access
+    error_message = "At least one EKS cluster endpoint access mode must be enabled."
   }
 
   validation {
-    condition     = length(var.cluster_endpoint_public_access_cidrs) > 0
-    error_message = "Provide at least one CIDR block."
+    condition     = !var.cluster_endpoint_public_access || length(var.cluster_endpoint_public_access_cidrs) > 0
+    error_message = "Provide at least one restricted IPv4 CIDR block when public endpoint access is enabled."
+  }
+}
+
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "Trusted IPv4 CIDR blocks for the optional public API endpoint. Empty when disabled; /0 and IPv6 ranges are not accepted."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for cidr in var.cluster_endpoint_public_access_cidrs : try(cidrnetmask(cidr) != "0.0.0.0", false)
+    ])
+    error_message = "Cluster endpoint CIDRs must be valid, restricted IPv4 ranges. Unrestricted /0 ranges and IPv6 are not accepted by this IPv4 baseline."
   }
 }
 

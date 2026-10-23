@@ -229,8 +229,10 @@ resource "aws_eks_node_group" "main" {
   }
 
   instance_types = var.eks_instance_types
-  disk_size      = var.eks_disk_size
-  capacity_type  = var.enable_spot_instances ? "SPOT" : "ON_DEMAND"
+  # AL2 images are unavailable for Kubernetes 1.33 and newer.
+  ami_type      = "AL2023_x86_64_STANDARD"
+  disk_size     = var.eks_disk_size
+  capacity_type = var.enable_spot_instances ? "SPOT" : "ON_DEMAND"
 
   # Enable SSH access only if key is provided
   dynamic "remote_access" {
@@ -271,6 +273,7 @@ resource "aws_eks_node_group" "main" {
 # Security Groups
 # ------------------------------------------------------------------------------
 
+# This supplements the cluster security group created and managed by EKS.
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.project_name}-${var.environment}-cluster-sg"
   description = "Security group for the EKS cluster control plane"
@@ -305,6 +308,8 @@ resource "aws_security_group_rule" "cluster_ingress_nodes" {
   description              = "Allow nodes to communicate with the cluster API"
 }
 
+# This group is referenced by the optional SSH source rule. No launch template
+# attaches it to managed nodes; do not treat these rules as their effective policy.
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.project_name}-${var.environment}-node-sg"
   description = "Security group for EKS worker nodes"

@@ -22,8 +22,8 @@ vpc_cidr_block             = "10.0.0.0/16"
 public_subnet_cidr_blocks  = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidr_blocks = ["10.0.3.0/24", "10.0.4.0/24"]
 
-# Cost Optimization: Set to false to disable NAT Gateways in dev environments
-# Estimated savings: ~$32/month per NAT Gateway
+# Keep NAT enabled unless alternative egress or all required VPC endpoints exist.
+# Private EKS API access alone does not provide access to AWS services or registries.
 enable_nat_gateway = true
 
 # High Availability vs. Cost: single NAT Gateway saves ~$32/month
@@ -38,14 +38,16 @@ enable_vpc_flow_logs = true
 # EKS Cluster Configuration
 # ------------------------------------------------------------------------------
 
-eks_cluster_version = "1.29"
+# Standard-support default reviewed on 2026-10-23; check availability before apply.
+# This is a new-cluster baseline, not a direct upgrade path from an older cluster.
+eks_cluster_version = "1.36"
 
 # Node Group Scaling - Start small, scale as needed
 eks_desired_capacity = 2  # Recommended starting point
 eks_max_size         = 3  # Optimized for cost (reduced from 4)
 eks_min_size         = 1  # Can scale down to 1 during low usage
 
-# Instance Configuration - Mixed types for cost optimization
+# Instance Configuration - x86_64 types for the explicit AL2023 node AMI
 # t3.medium: ~$0.0416/hour, t3a.medium: ~$0.0374/hour
 eks_instance_types = ["t3.medium", "t3a.medium"]
 eks_disk_size      = 20  # Minimum recommended size
@@ -58,14 +60,14 @@ eks_ssh_key_name = ""
 # Cost: ~$1/month per key + $0.03 per 10,000 requests
 enable_cluster_encryption = true
 
-# Cluster Endpoint Access
-cluster_endpoint_public_access  = true
+# Cluster Endpoint Access: administration needs VPC-connected routing and HTTPS rules.
+cluster_endpoint_public_access  = false
 cluster_endpoint_private_access = true
 
-# Security: Restrict API access to your IP/VPN before any real deployment.
-# IMPORTANT: 0.0.0.0/0 is convenient for first-time testing, not a production setting.
-# Example: ["203.0.113.10/32"]
-cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+# To opt in to public access, set the flag above to true AND supply your real
+# trusted egress IP/VPN CIDR. Example only: ["203.0.113.10/32"]. Keep private access.
+# Empty is valid while public access is disabled. IPv6 and /0 ranges are rejected.
+cluster_endpoint_public_access_cidrs = []
 
 # Control Plane Logging (all types enabled for maximum visibility)
 # Cost: ~$0.50/GB ingested, recommend all types for security
@@ -127,7 +129,7 @@ additional_tags = {
 # ==============================================================================
 #
 # 1. IMMEDIATE SAVINGS (Development/Testing):
-#    - Set enable_nat_gateway = false                  → Save $32-52/month
+#    - Review NAT costs; disable only with a tested alternative egress design
 #    - Set enable_spot_instances = true                → Save $36/month (60% off EC2)
 #    - Set cloudwatch_log_group_retention_days = 1     → Save ~$1-3/month
 #    - Reduce cluster_enabled_log_types = ["api"]      → Save ~$1-5/month
@@ -161,7 +163,8 @@ additional_tags = {
 # 1. Network Security (Implemented):
 #    ✓ Private subnets for worker nodes
 #    ✓ VPC Flow Logs enabled
-#    ✓ Security groups with least privilege
+#    ✓ Private API endpoint by default, with blocking guards for public opt-in
+#    ! Security-group egress and managed-node associations need further hardening
 #    ✓ Baseline network ACL associated to all subnets
 #
 # 2. Data Protection (Implemented):
@@ -177,10 +180,10 @@ additional_tags = {
 # 4. Compliance & Audit (Implemented):
 #    ✓ Control plane logging
 #    ✓ Resource tagging
-#    ✓ Automated security scanning (tfsec)
+#    ✓ Automated advisory security scanning (Trivy)
 #
 # 5. RECOMMENDED ACTIONS:
-#    → Change cluster_endpoint_public_access_cidrs to your IP
+#    → Establish private administration connectivity; restrict CIDRs if opting in to public access
 #    → Enable AWS GuardDuty (~$5-10/month)
 #    → Implement Pod Security Standards (free)
 #    → Use AWS Secrets Manager for sensitive data

@@ -1,6 +1,6 @@
 # CloudKube EKS Terraform Pipeline
 
-[![Terraform](https://img.shields.io/badge/Terraform-1.6%2B-623CE4?logo=terraform)](https://developer.hashicorp.com/terraform)
+[![Terraform](https://img.shields.io/badge/Terraform-1.11%2B-623CE4?logo=terraform)](https://developer.hashicorp.com/terraform)
 [![AWS](https://img.shields.io/badge/AWS-EKS-FF9900?logo=amazon-aws)](https://aws.amazon.com/eks/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -19,7 +19,7 @@ This repository is intended as a credible starting point for an EKS foundation, 
 - Managed EKS add-ons:
   `vpc-cni`, `kube-proxy`, `coredns`, `aws-ebs-csi-driver`
 - VPC Flow Logs to CloudWatch Logs
-- GitHub Actions workflow for `fmt`, `validate`, Trivy reports, manual plan/apply, and generated documentation
+- GitHub Actions workflow for `fmt`, `validate`, tests with mocked providers, Trivy reports, manual plan/apply, and generated documentation
 - Pre-commit, TFLint, and terraform-docs configuration for contributor workflows
 
 ## What It Does Not Include
@@ -36,6 +36,9 @@ This repository is intended as a credible starting point for an EKS foundation, 
 Implemented in code:
 
 - Worker nodes run in private subnets
+- Kubernetes API access is private by default; public access requires explicit, restricted IPv4 CIDRs
+- Root input validation rejects disabled access in both modes, public access without CIDRs, malformed CIDRs, IPv6 ranges, and unrestricted `/0` ranges
+- Public and private subnets disable automatic public IPv4 assignment
 - EKS secrets encryption can be enabled with a dedicated KMS key
 - IRSA can be enabled through an IAM OIDC provider
 - Control plane logs are configurable and sent to CloudWatch Logs
@@ -44,7 +47,8 @@ Implemented in code:
 
 Important limitations:
 
-- The default API endpoint configuration still allows public access and defaults to `0.0.0.0/0` for convenience in non-production use. Restrict `cluster_endpoint_public_access_cidrs` or disable public access before real deployments.
+- Administration of the private API requires VPC-connected routing, DNS, authorized Kubernetes credentials, and security-group rules allowing HTTPS from the administration host or network. This repository does not provision that access path.
+- Security-group egress remains broad. The custom node security group is an optional SSH source, not a group automatically attached to managed nodes; EKS creates an additional cluster security group. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) before treating these rules as the effective network policy.
 - The repository does not create workload IAM roles beyond the EBS CSI driver role.
 - The custom network ACL is permissive and should not be treated as a hardened network boundary.
 - The backend configuration is only a commented example; production state management must be provisioned separately.
@@ -60,6 +64,7 @@ Important limitations:
 │   ├── outputs.tf
 │   ├── providers.tf
 │   ├── terraform.tfvars.example
+│   ├── tests
 │   ├── variables.tf
 │   └── modules
 │       ├── eks
@@ -73,13 +78,15 @@ Important limitations:
 
 ## Prerequisites
 
-- Terraform `>= 1.6`
+- Terraform `>= 1.11, < 2.0` (`1.12.2` is used in CI)
 - AWS CLI v2
 - AWS credentials with permission to manage VPC, IAM, CloudWatch, KMS, and EKS resources
 - Optional:
   `kubectl`, `pre-commit >= 4.4.0`, `tflint`, `Trivy 0.76.1`, `terraform-docs`
 
 ## Quick Start
+
+These defaults target a new cluster. Review the [compatibility and migration notes](COMPATIBILITY.md) before changing an existing environment. Configure remote state and an administration access path before applying.
 
 ```bash
 git clone https://github.com/eneiasbrumjr/cloudkube-eks-terraform-pipeline-enb.git
@@ -90,20 +97,24 @@ terraform plan
 terraform apply
 ```
 
-After apply:
+After apply, run these commands from a host with access to the private endpoint:
 
 ```bash
 aws eks update-kubeconfig --region us-east-1 --name cloudkube-eks-dev
 kubectl get nodes
 ```
 
+`update-kubeconfig` configures credentials and the endpoint address; it does not create network connectivity. For an intentional public-access setup, set `cluster_endpoint_public_access = true` and supply your real trusted IPv4 egress CIDRs in `cluster_endpoint_public_access_cidrs`. Keep private access enabled so nodes can use the private API. An example documentation address such as `203.0.113.10/32` must be replaced before use. See the [AWS endpoint access requirements](https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html).
+
 ## Deployment Notes
 
-- The root module currently defaults to Kubernetes `1.29`.
+- The root module defaults to Kubernetes `1.36`, reviewed against the AWS support calendar on 2026-10-23. The managed node group explicitly uses `AL2023_x86_64_STANDARD`; select compatible x86_64 instance types. See [COMPATIBILITY.md](COMPATIBILITY.md) for support dates, provider evidence, and existing-cluster migration limits.
 - The EKS control plane is attached to private subnets only.
 - The managed node group also uses private subnets only.
+- Public subnets retain their internet-gateway route and load-balancer discovery tags. Disabling automatic public IPs does not remove those routes; the NAT gateway continues to use its explicitly allocated Elastic IP.
+- Keep NAT enabled unless a tested alternative supplies the required AWS-service and container-registry access. A private Kubernetes API endpoint alone does not provide those dependencies.
 - For production use, provision remote state first and replace the commented example in `infra/backend.tf`.
-- Review `infra/terraform.tfvars.example` carefully before first apply. Several example values are intentionally convenience-oriented for local testing.
+- Review `infra/terraform.tfvars.example` before first apply. Its historical cost estimates have not been refreshed in this compatibility review.
 
 ## CI/CD
 
@@ -111,12 +122,12 @@ The workflow separates checks that need no AWS credentials from manual cloud ope
 
 | Trigger | Behavior |
 | --- | --- |
-| Pull request targeting `main`, or push to `main`, matching the workflow path filters | Format check, backend-free initialization, Terraform validation, advisory security report, and documentation generation |
+| Pull request targeting `main`, or push to `main`, matching the workflow path filters | Format check, backend-free initialization, Terraform validation, tests with mocked providers, advisory security report, and documentation generation |
 | Manual run with `operation: validate` (default) | The same checks, without cloud authentication |
 | Manual run on `main` with `operation: plan` | Checks, AWS authentication, remote-state verification, and Terraform plan |
 | Manual run on `main` with `operation: apply` | Checks, AWS authentication, remote-state verification, plan, and apply through the `production` environment |
 
-A push or pull request never starts a cloud plan or apply. Format failures, initialization errors, validation errors, and cloud plan errors fail their jobs.
+A push or pull request never starts a cloud plan or apply. Test runs explicitly use `command = plan` with mocked AWS and TLS providers; they evaluate configuration without querying an AWS account. Format failures, initialization errors, validation errors, failed tests, and cloud plan errors fail their jobs.
 
 ### Reports and generated documentation
 
@@ -159,6 +170,7 @@ pre-commit run --all-files
 cd infra
 terraform fmt -recursive
 terraform validate
+terraform test -no-color
 ```
 
 For the security check alone, run `pre-commit run terraform_trivy --all-files` or `bash scripts/scan-terraform.sh` from the repository root. The script scans all of `infra`, shows advisory findings, and cleans up its temporary files. It requires no AWS credentials.
@@ -186,6 +198,7 @@ What it does provide is a solid, reviewable EKS infrastructure baseline that can
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+- [COMPATIBILITY.md](COMPATIBILITY.md)
 - [PROJECT_STATUS.md](PROJECT_STATUS.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
