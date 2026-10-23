@@ -112,11 +112,12 @@ resource "aws_iam_role_policy" "vpc_flow_log" {
 # ------------------------------------------------------------------------------
 
 resource "aws_subnet" "public" {
-  count                   = length(var.public_subnet_cidr_blocks)
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = var.public_subnet_cidr_blocks[count.index]
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
+  count             = length(var.public_subnet_cidr_blocks)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.public_subnet_cidr_blocks[count.index]
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+  # NAT uses an explicit Elastic IP; public routing does not require auto-IP assignment.
+  map_public_ip_on_launch = false
 
   tags = merge(
     {
@@ -131,10 +132,11 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_subnet" "private" {
-  count             = length(var.private_subnet_cidr_blocks)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = var.private_subnet_cidr_blocks[count.index]
-  availability_zone = data.aws_availability_zones.available.names[count.index]
+  count                   = length(var.private_subnet_cidr_blocks)
+  vpc_id                  = aws_vpc.main.id
+  map_public_ip_on_launch = false
+  cidr_block              = var.private_subnet_cidr_blocks[count.index]
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
 
   tags = merge(
     {

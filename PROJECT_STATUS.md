@@ -12,13 +12,13 @@ This repository provides a solid EKS foundation layer:
 - EKS add-ons for `vpc-cni`, `kube-proxy`, `coredns`, and `aws-ebs-csi-driver`
 - Optional EKS secrets encryption and IRSA
 - VPC Flow Logs and configurable control-plane logging
-- GitHub Actions workflow for validation, security scanning, planning, apply, and terraform-docs updates
+- GitHub Actions workflow for validation, tests with mocked providers, security scanning, manual planning/apply, and generated documentation
 
 ## Current Maturity
 
 **Status: infrastructure baseline with validated GitHub Actions checks; cloud deployment remains unvalidated.**
 
-On 2026-10-23, actionlint accepted the repaired workflow and Terraform formatting and validation passed with the existing provider versions. The Linux runner checksums were added to the dependency lockfile. Trivy generated a SARIF report with six existing configuration findings (four critical, two high), and terraform-docs generated documentation successfully. See [TEST_RESULTS.md](TEST_RESULTS.md) for commands and limits.
+The current baseline defaults to Kubernetes 1.36 with an explicit AL2023 x86_64 node AMI, private API access, blocking endpoint input guards, and no automatic public-IP assignment in subnets. The local Trivy result fell from six findings to two remaining CRITICAL unrestricted-egress findings. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for their disposition, [COMPATIBILITY.md](COMPATIBILITY.md) for dated support and migration notes, and [TEST_RESULTS.md](TEST_RESULTS.md) for executed checks and limits.
 
 Automatic runs perform checks without AWS credentials. Cloud plan and apply require an explicit manual operation on `main` and an initialized S3 backend. The backend remains an unconfigured example, so cloud operations are not ready to run.
 
@@ -28,12 +28,17 @@ What still depends on the adopting team:
 
 - remote-state provisioning
 - GitHub OIDC IAM setup in AWS
-- endpoint exposure hardening
+- private administration connectivity and review of effective security-group attachments and egress
 - workload add-ons and operational tooling
 - RBAC, policy, and application-level security
 
 ## Recent Improvements
 
+- Refreshed Kubernetes version availability and selected an explicit AL2023 node AMI
+- Made public API access an explicit opt-in with blocking IPv4 allowlist guards
+- Disabled automatic public-IP assignment without removing NAT or internet-gateway routes
+- Added plan-only tests with mocked AWS and TLS providers to automatic checks
+- Documented the two remaining egress findings and corrected security-group output descriptions
 - Updated the automatic workflow actions to Node24 releases pinned by commit
 - Aligned local and GitHub Actions security scans through one Trivy script with isolated temporary caches
 - Repaired workflow syntax and separated automatic validation from manual cloud operations
@@ -50,10 +55,11 @@ What still depends on the adopting team:
 
 ## Known Gaps
 
-- Kubernetes version compatibility still requires review before deployment
-- Security scan findings remain advisory and require contextual review
-
-- Public endpoint access remains enabled by default for convenience
+- Regional EKS/add-on availability, node readiness, and workload compatibility remain unvalidated
+- Two CRITICAL unrestricted-egress findings remain; the scanner is advisory
+- EKS-managed security-group rules and actual node-group attachments need explicit design and validation
+- Private administration routing and ingress are not provisioned
+- Existing AL2 node groups require a separate migration plan; the current fixed name and create-before-destroy behavior do not automate replacement
 - The custom network ACL is permissive
 - No AWS Load Balancer Controller, Metrics Server, Cluster Autoscaler, or ExternalDNS
 - No remote-state bootstrap module
@@ -61,7 +67,7 @@ What still depends on the adopting team:
 
 ## Recommended Next Steps
 
-1. Provision remote state with S3 and DynamoDB.
-2. Create AWS IAM resources for GitHub OIDC and remove long-lived CI secrets.
-3. Restrict or disable public EKS API access for non-development environments.
+1. Define and validate effective security-group ownership and required egress, addressing the two remaining CRITICAL findings.
+2. Prepare private administration connectivity, durable remote state and locking, and GitHub OIDC trust in a deliberately configured environment.
+3. Review the actual cluster and node state before any existing-environment upgrade, then validate regional EKS/add-on availability and workloads.
 4. Add workload-level controls and add-ons in separate modules rather than growing the base layer indiscriminately.

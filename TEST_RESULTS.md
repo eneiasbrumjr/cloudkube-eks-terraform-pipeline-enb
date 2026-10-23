@@ -2,6 +2,41 @@
 
 Last reviewed: 2026-10-23
 
+## EKS compatibility and network-default validation - 2026-10-23
+
+This change follows merge commit `ea2c671c4a677c9963cefdfca76a99d603bbba9a`. The candidate changes the new-cluster Kubernetes default to 1.36, makes the AL2023 x86_64 node AMI explicit, disables public API access and automatic public-IP assignment by default, and adds blocking endpoint input guards. Terraform runs on 1.12.2 with AWS provider 5.100.0 and TLS provider 4.2.1; provider versions and the dependency lockfile are unchanged. The minimum supported Terraform version is now 1.11 for plan-time provider mocks.
+
+| Check | Local result |
+| --- | --- |
+| Terraform format check and `git diff --check` | Passed |
+| Backend-free initialization with the readonly lockfile | Passed with the verified local provider packages |
+| Terraform schema validation | Passed; zero errors and zero warnings |
+| Terraform tests with mocked AWS and TLS providers | **13 passed, 0 failed**; all runs use `command = plan` |
+| actionlint 1.7.12 | Passed for the workflow containing the new test step |
+| Shared Trivy 0.76.1 scan | Passed in advisory mode; SARIF 2.1.0 with **2 CRITICAL findings**, both AWS-0104 |
+| terraform-docs 0.17.0 | Generated the README input/output tables in an isolated copy |
+
+The test suite contains ten root-module cases, two EKS-module cases, and one VPC-module case. Positive cases cover private defaults, explicit public CIDRs, version overrides, the explicit AL2023 AMI, add-on version filters, disabled subnet auto-IP assignment, and preserved NAT/Elastic IP/internet-gateway routing and subnet associations. Seven negative cases require validation failures for disabled endpoint modes, a missing public allowlist, `/0` (including a noncanonical address), IPv6, malformed CIDRs, and the removed 1.29 version.
+
+Synthetic provider responses supply computed IDs, availability-zone names, an add-on response, and an OIDC certificate fixture. The endpoint flags, CIDR inputs, Kubernetes versions, AMI, subnet settings, and route arguments under assertion come from the real configuration. Tests were run without cloud credentials. Initialization uses provider packages; the test plans do not query an AWS account, make TLS connections, or create resources.
+
+The security result changed from six findings (four CRITICAL and two HIGH) to two CRITICAL unrestricted-egress findings. No ignore rule or scanner policy change was added. [SECURITY_AUDIT.md](SECURITY_AUDIT.md) explains why the remaining custom-group rules and the EKS-managed security group require a separate effective-network review.
+
+Commands from the repository root, after installing the pinned tools:
+
+```sh
+terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+terraform -chdir=infra fmt -check -recursive
+terraform -chdir=infra validate -no-color
+terraform -chdir=infra test -no-color
+actionlint .github/workflows/terraform-eks-pipeline.yml
+bash scripts/scan-terraform.sh /tmp/cloudkube-results.sarif
+```
+
+Local initialization reused verified provider packages after clearing incomplete temporary cache copies; neither the lockfile nor the provider binaries needed modification. The final checks passed. Hosted results for this revision are recorded in its pull request and GitHub Actions runs.
+
+These results do not establish regional EKS or add-on availability, successful AL2023 bootstrap, workload compatibility, actual security-group attachments, or private-endpoint connectivity. No AWS authentication, remote backend access, real cloud plan, apply, or deployment was performed. TFLint and the full pre-commit suite were not rerun in this change. See [COMPATIBILITY.md](COMPATIBILITY.md) before planning any existing-environment upgrade.
+
 ## Tooling alignment validation - 2026-10-23
 
 This maintenance follows merge commit `5dd2f1d941ac3426f96f4499b5df420762c7a00a`. Infrastructure source, Terraform 1.12.2, and provider versions remain unchanged.
@@ -29,7 +64,7 @@ The shared `scripts/scan-terraform.sh` requires Trivy 0.76.1, uses an empty temp
 | Simulated incompatible Trivy version | Failed before scanning, with required and detected versions |
 | Source and temporary-file integrity | Infrastructure, script, and configuration hashes unchanged by tests; no scan outputs left in the checkouts |
 
-The finding baseline remains six occurrences across four rules: four critical and two high. Tests used temporary checkout copies and an isolated pre-commit cache. Only the `terraform_trivy` hook was executed; the remaining hooks were preserved and their full suite was not revalidated. The existing pre-commit-hooks 4.5.0 manifest emitted a non-blocking warning about old stage names.
+At this earlier tooling-maintenance revision, the finding baseline remained six occurrences across four rules: four critical and two high. Tests used temporary checkout copies and an isolated pre-commit cache. Only the `terraform_trivy` hook was executed; the remaining hooks were preserved and their full suite was not revalidated. The existing pre-commit-hooks 4.5.0 manifest emitted a non-blocking warning about old stage names.
 
 Cloud authentication actions and the manual plan/apply gates were preserved. No AWS authentication, remote backend access, Terraform plan/apply, or deployment was executed. Hosted execution and the post-merge SARIF integration are recorded in the associated pull request and its GitHub Actions runs.
 

@@ -47,7 +47,7 @@ env:
 
 jobs:
   terraform-validate:
-    name: "Terraform Format & Validate"
+    name: "Terraform Format, Validate & Test"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -78,12 +78,19 @@ jobs:
         id: validate
         run: terraform validate -no-color
 
+      - name: "Terraform Tests with Mocked Providers"
+        id: test
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: terraform test -no-color
+
       - name: "Summarize Validation"
         if: always()
         env:
           FMT_RESULT: ${{ steps.fmt.outcome }}
           INIT_RESULT: ${{ steps.init.outcome }}
           VALIDATE_RESULT: ${{ steps.validate.outcome }}
+          TEST_RESULT: ${{ steps.test.outcome }}
         run: |
           {
             echo "## Terraform validation"
@@ -91,8 +98,9 @@ jobs:
             printf '| Format | %s |\n' "$FMT_RESULT"
             printf '| Init without backend | %s |\n' "$INIT_RESULT"
             printf '| Validate | %s |\n' "$VALIDATE_RESULT"
+            printf '| Tests with mocked providers | %s |\n' "$TEST_RESULT"
             echo ""
-            echo "These checks do not authenticate to AWS or execute a Terraform plan or apply."
+            echo "Test plans use mocked AWS and TLS providers. These checks do not authenticate to AWS, plan against a cloud account, or apply resources."
           } >> "$GITHUB_STEP_SUMMARY"
 
   terraform-security-scan:

@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### EKS compatibility and network defaults - 2026-10-23
+
+- Set the new-cluster Kubernetes default to 1.36 and explicitly selected the AL2023 x86_64 managed-node AMI without upgrading provider versions.
+- Refreshed the dated version allowlist to 1.31 through 1.37, distinguishing standard support from extended support in `COMPATIBILITY.md`.
+- Disabled public API access by default and replaced advisory endpoint checks with blocking root input validations. Public access requires explicit IPv4 CIDRs; `/0`, IPv6, malformed CIDRs, and configurations with no endpoint access are rejected.
+- Disabled automatic public-IP assignment in public subnets and made the private-subnet setting explicit, preserving NAT and internet-gateway routing.
+- Corrected descriptions of the custom security groups and documented the remaining unrestricted-egress findings and EKS-managed group behavior.
+- Added plan-only tests with mocked providers to local checks and CI.
+- Raised the minimum Terraform requirement to 1.11 for plan-time provider mocks and cross-variable validation; the workflow remains on 1.12.2.
+- Documented breaking defaults: existing clusters need a reviewed upgrade, AL2 node-group replacement, and administration connectivity plan before applying this configuration.
+
 ### Tooling maintenance - 2026-10-23
 
 - Updated checkout, Terraform setup, artifact upload, and SARIF upload actions to Node24 releases pinned by commit.

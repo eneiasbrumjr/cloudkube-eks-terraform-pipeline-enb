@@ -35,12 +35,12 @@ output "cluster_ca_certificate" {
 }
 
 output "cluster_security_group_id" {
-  description = "The security group ID attached to the EKS cluster control plane."
+  description = "The additional control-plane security group ID; this is not the cluster security group managed by EKS."
   value       = aws_security_group.eks_cluster.id
 }
 
 output "node_security_group_id" {
-  description = "The security group ID attached to the EKS nodes."
+  description = "The custom security group used as an optional SSH source; it is not automatically attached to managed nodes."
   value       = aws_security_group.eks_nodes.id
 }
 

@@ -16,7 +16,7 @@ The project aims to stay small, readable, and honest about what it implements. C
 
 Prerequisites:
 
-- Terraform `1.12.2` to match the workflow (the configuration allows `>= 1.6`)
+- Terraform `1.12.2` to match the workflow (the configuration requires `>= 1.11, < 2.0` for plan-time provider mocks and cross-variable input validation)
 - Git, Bash, and Python 3
 - Optional:
   `pre-commit >= 4.4.0`, `tflint`, `terraform-docs`
@@ -71,6 +71,7 @@ From `infra/`:
 ```bash
 terraform fmt -recursive
 terraform validate
+terraform test -no-color
 ```
 
 If you have the tools installed locally, also run:
@@ -81,6 +82,10 @@ terraform-docs .
 ```
 
 ## Pull Request Expectations
+
+The tests in `infra/tests` use mocked AWS and TLS providers, and every run uses `command = plan`. They cover endpoint guards, version and AMI choices, and subnet routing without AWS credentials or resource creation. Provider downloads during `init` still require registry access. Mock tests do not establish regional EKS availability, add-on compatibility with real workloads, or deployment readiness.
+
+When adding a test, keep these automatic runs isolated from real provider operations. Cloud integration checks require a separate, deliberately configured environment.
 
 A good pull request for this repository should:
 
