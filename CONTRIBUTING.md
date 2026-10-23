@@ -16,11 +16,13 @@ The project aims to stay small, readable, and honest about what it implements. C
 
 Prerequisites:
 
-- Terraform `>= 1.6`
-- AWS CLI v2
-- Git
+- Terraform `1.12.2` to match the workflow (the configuration allows `>= 1.6`)
+- Git, Bash, and Python 3
 - Optional:
-  `pre-commit`, `tflint`, `tfsec`, `terraform-docs`
+  `pre-commit >= 4.4.0`, `tflint`, `terraform-docs`
+- [Trivy `0.76.1`](https://github.com/aquasecurity/trivy/releases/tag/v0.76.1) for the local security hook
+
+Install Trivy separately and make it available on `PATH`; pre-commit does not install it. The hook reports a clear failure if Trivy is missing or has a different version. AWS CLI v2 and AWS credentials are only needed for cloud operations.
 
 Recommended setup:
 
@@ -28,8 +30,7 @@ Recommended setup:
 git clone https://github.com/YOUR-USERNAME/cloudkube-eks-terraform-pipeline-enb.git
 cd cloudkube-eks-terraform-pipeline-enb
 pre-commit install
-cd infra
-terraform init
+terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
 ```
 
 ## Development Workflow
@@ -48,6 +49,23 @@ From the repository root:
 pre-commit run --all-files
 ```
 
+To run only the security hook:
+
+```bash
+pre-commit run terraform_trivy --all-files
+```
+
+The hook and GitHub Actions use the same `scripts/scan-terraform.sh` script. It scans all of `infra` once, including commits that only remove files. It uses Trivy's bundled checks with an empty temporary cache and reports findings at medium severity or above. Findings remain advisory; tool, parsing, and report errors block the check. The remaining pre-commit hooks retain their existing tools and settings.
+
+For a direct scan, or to retain a SARIF (Static Analysis Results Interchange Format) report:
+
+```bash
+bash scripts/scan-terraform.sh
+bash scripts/scan-terraform.sh /tmp/cloudkube-results.sarif
+```
+
+The default invocation removes its temporary report and cache when it finishes. A supplied relative report path is resolved from the repository root.
+
 From `infra/`:
 
 ```bash
@@ -59,7 +77,6 @@ If you have the tools installed locally, also run:
 
 ```bash
 tflint --config=../.tflint.hcl
-tfsec .
 terraform-docs .
 ```
 

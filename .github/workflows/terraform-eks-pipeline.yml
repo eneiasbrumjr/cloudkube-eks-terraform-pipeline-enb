@@ -8,6 +8,7 @@ on:
       - 'infra/**'
       - '.github/workflows/terraform-eks-pipeline.yml'
       - '.terraform-docs.yml'
+      - 'scripts/scan-terraform.sh'
   pull_request:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - 'infra/**'
       - '.github/workflows/terraform-eks-pipeline.yml'
       - '.terraform-docs.yml'
+      - 'scripts/scan-terraform.sh'
   workflow_dispatch:
     inputs:
       operation:
@@ -54,12 +56,12 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
       - name: "Setup Terraform"
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
@@ -104,7 +106,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -115,42 +117,11 @@ jobs:
           cache: "false"
 
       - name: "Run Trivy Configuration Scan"
-        run: |
-          set +e
-          trivy config --skip-check-update --disable-telemetry \
-            --format sarif --severity MEDIUM,HIGH,CRITICAL --exit-code 0 \
-            --output results.sarif infra 2>trivy.log
-          scan_status=$?
-          set -e
-          cat trivy.log >&2
-          if [ "$scan_status" -ne 0 ]; then
-            exit "$scan_status"
-          fi
-          if grep -Fq '[terraform parser] Error parsing file' trivy.log; then
-            echo "::error::Trivy could not parse a Terraform file. The report is incomplete."
-            exit 1
-          fi
-
-      - name: "Check and Summarize Security Report"
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          with open("results.sarif", encoding="utf-8") as report_file:
-              report = json.load(report_file)
-          if report.get("version") != "2.1.0" or not report.get("runs"):
-              raise SystemExit("Expected a valid SARIF report with at least one run.")
-          count = sum(len(run.get("results", [])) for run in report["runs"])
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Security scan (advisory)\n\n")
-              summary.write(f"Trivy reported {count} findings at medium severity or above.\n\n")
-              summary.write("Findings do not block this baseline. Review the SARIF report; a successful job does not mean the configuration is free of findings.\n")
-          PY
+        run: bash scripts/scan-terraform.sh results.sarif
 
       - name: "Upload Security Report Artifact"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trivy-results
           path: results.sarif
@@ -158,8 +129,8 @@ jobs:
           retention-days: 7
 
       - name: "Upload SARIF to GitHub Security"
-        if: ${{ !cancelled() && hashFiles('results.sarif') != '' && github.event_name != 'pull_request' }}
-        uses: github/codeql-action/upload-sarif@v3
+        if: ${{ success() && github.event_name != 'pull_request' }}
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: results.sarif
           checkout_path: infra
@@ -171,7 +142,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -184,7 +155,7 @@ jobs:
           git-push: "false"
 
       - name: "Upload Generated README"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: terraform-documentation
           path: README.md
@@ -209,7 +180,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -230,7 +201,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: "Setup Terraform"
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
@@ -271,7 +242,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -292,7 +263,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: "Setup Terraform"
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false

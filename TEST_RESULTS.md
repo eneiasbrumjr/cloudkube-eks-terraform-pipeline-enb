@@ -2,6 +2,47 @@
 
 Last reviewed: 2026-10-23
 
+## Tooling alignment validation - 2026-10-23
+
+This maintenance follows merge commit `5dd2f1d941ac3426f96f4499b5df420762c7a00a`. Infrastructure source, Terraform 1.12.2, and provider versions remain unchanged.
+
+The automatic checks use the following Node24 actions, each pinned to the full commit recorded in the workflow:
+
+| Action | Release |
+| --- | --- |
+| actions/checkout | 5.1.0 |
+| hashicorp/setup-terraform | 4.0.1 |
+| actions/upload-artifact | 7.0.2 |
+| github/codeql-action/upload-sarif | 4.39.1 |
+
+The shared `scripts/scan-terraform.sh` requires Trivy 0.76.1, uses an empty temporary cache, validates its SARIF report, and preserves advisory findings with blocking operational and parsing errors. The local hook requires pre-commit 4.4 or newer; validation used pre-commit 4.7.0.
+
+| Check | Result |
+| --- | --- |
+| actionlint 1.7.12 and Bash syntax check | Passed |
+| pre-commit configuration validation | Passed |
+| Shared script with an explicit report path | Passed; SARIF 2.1.0 with six findings |
+| Shared script without arguments, invoked outside the checkout root | Passed; six findings, no files left in the checkout |
+| terraform_trivy hook with the full repository configuration | Passed; findings remained visible |
+| Malformed Terraform fixture through the script and through the hook | Both failed with the expected parsing error |
+| Trivy absent from PATH | Failed with installation guidance |
+| Simulated incompatible Trivy version | Failed before scanning, with required and detected versions |
+| Source and temporary-file integrity | Infrastructure, script, and configuration hashes unchanged by tests; no scan outputs left in the checkouts |
+
+The finding baseline remains six occurrences across four rules: four critical and two high. Tests used temporary checkout copies and an isolated pre-commit cache. Only the `terraform_trivy` hook was executed; the remaining hooks were preserved and their full suite was not revalidated. The existing pre-commit-hooks 4.5.0 manifest emitted a non-blocking warning about old stage names.
+
+Cloud authentication actions and the manual plan/apply gates were preserved. No AWS authentication, remote backend access, Terraform plan/apply, or deployment was executed. Hosted execution and the post-merge SARIF integration are recorded in the associated pull request and its GitHub Actions runs.
+
+Commands from the repository root:
+
+```sh
+actionlint .github/workflows/terraform-eks-pipeline.yml
+bash -n scripts/scan-terraform.sh
+pre-commit validate-config
+pre-commit run terraform_trivy --all-files
+bash scripts/scan-terraform.sh /tmp/cloudkube-results.sarif
+```
+
 ## Workflow repair validation - 2026-10-23
 
 The checks below ran against the candidate based on commit `5e6634a6691dfc8fdb6599bc8b7ca5e011a1d468`. Infrastructure `.tf` files were unchanged; the dependency lockfile gained Linux checksums and aligned constraint metadata without changing provider versions.
@@ -65,7 +106,7 @@ Trivy runs with its bundled checks for reproducibility. The advisory finding pol
 
 No AWS authentication, remote backend access, Terraform plan/apply, or deployment was executed. The GitHub Actions run verifies the hosted checks described above; it does not establish cloud deployment or Kubernetes runtime readiness.
 
-`pre-commit` and `tflint` were not run. The optional local pre-commit configuration still includes tfsec and needs a separate tooling update; the CI workflow uses Trivy.
+During this earlier workflow repair, `pre-commit` and `tflint` were not run and the local hook still used tfsec. The tooling maintenance recorded above subsequently replaced that hook with the shared Trivy scan.
 
 ## Historical validation - 2026-04-13
 
