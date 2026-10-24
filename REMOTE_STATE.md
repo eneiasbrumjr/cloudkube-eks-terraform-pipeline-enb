@@ -2,11 +2,13 @@
 
 Reviewed **2026-10-23** for Terraform **1.12.2**. This is documentation for an existing backend; no AWS resources, credentials, IAM roles or state migration were created or verified.
 
-`infra/backend.tf` remains a **commented example**. Local validation still uses the local backend. A separate bootstrap root and GitHub OIDC provisioning remain **pending work of medium effort**; they are outside this batch.
+`infra/backend.tf` remains a **commented example**. Local validation still uses the local backend. The separate [bootstrap root](bootstrap/README.md) now defines S3/KMS resources and GitHub identities with mocked validation. Operator provisioning, live permission/locking checks and state migration remain pending; none run automatically.
 
 ## Prepare the backing resources once
 
 An authorized operator must prepare and verify these resources outside the EKS root before enabling remote state:
+
+The optional `bootstrap/` root provides these definitions. Its initial local state and later remote state belong to the operator, with a key separate from the workload; follow its runbook before applying or migrating it. Existing resources may instead be reviewed independently without importing them into this new root.
 
 - A dedicated S3 bucket in the intended region, with versioning enabled, all four Block Public Access settings enabled, and `BucketOwnerEnforced` ownership.
 - Default SSE-KMS encryption using an enabled customer-managed key in the bucket's region, with access for the intended operator and execution roles.
@@ -56,7 +58,7 @@ Routine plan/apply does **not** need `s3:DeleteObject` on the state, `s3:DeleteO
 
 Migration is a separate operator task requiring the appropriate source and destination state permissions; it is not delegated to either CI job by this table.
 
-Both roles need `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` on the configured KMS key, with corresponding key-policy authorization. A plan still writes its lockfile, so read-only state access does not mean decrypt-only KMS access. [KMS backend requirements](https://developer.hashicorp.com/terraform/language/v1.12.x/backend/s3#s3-state-storage).
+Both roles need `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` on the configured KMS key, with corresponding key-policy authorization. A plan still writes its lockfile, so read-only state access does not mean decrypt-only KMS access. The supplied bootstrap scopes key usage to regional S3 and exact workload object contexts, with S3 Bucket Keys disabled. [KMS backend requirements](https://developer.hashicorp.com/terraform/language/v1.12.x/backend/s3#s3-state-storage).
 
 The plan/state distinction is supported by the 1.12.2 implementation: the default workspace is always recognized, and refreshed state is saved in a plan rather than persisted until apply. Migration and creation of other workspaces require write access. [Workspace initialization](https://github.com/hashicorp/terraform/blob/v1.12.2/internal/backend/remote-state/s3/backend_state.go#L175-L248), [plan behavior](https://github.com/hashicorp/terraform/blob/v1.12.2/internal/backend/local/backend_plan.go#L154-L174).
 
@@ -84,7 +86,7 @@ These commands are operator instructions, **not actions executed by this reposit
 
 After migration, inspect the destination state locally, compare its lineage/resources with the protected source, and review a normal plan before applying. Do not print state into CI logs or upload state/backups as artifacts. Do not delete the source simply because `init` succeeded.
 
-If a future bootstrap configuration creates the backend resources, keep its own state separate and operator-controlled. Back it up before any migration; GitHub execution roles must not gain access to that bootstrap state or permission to delete its backing resources.
+When using the supplied bootstrap, keep its own state separate and operator-controlled. Back it up before any migration; its CI identity policies explicitly restrict access to that bootstrap state and destructive backend operations. Do not remove those restrictions to make a workload operation pass.
 
 ## Recovery
 
@@ -92,5 +94,6 @@ If a future bootstrap configuration creates the backend resources, keep its own 
 - **Deleted or overwritten state:** stop all writers, preserve the current state and relevant S3 versions, and have the recovery operator inspect the candidate version. Copying a known-good version to a new current version preserves history; it does not undo changes already made to AWS resources. Review the reconciled plan before resuming. [S3 version recovery](https://docs.aws.amazon.com/AmazonS3/latest/userguide/RestoringPreviousVersions.html).
 - **Manual state push:** Terraform checks lineage and serial. Investigate a mismatch instead of routinely overriding it with `-force`. [State push safeguards](https://developer.hashicorp.com/terraform/cli/commands/state/push).
 - **Protected copies:** keep state and saved plans out of Git and public artifacts, restrict local file access, and retain an encrypted backup outside the working directory. Do not disable/delete the KMS key while retained state versions still depend on it.
+- **Bootstrap encryption policy:** its bucket rejects uploads/copies without explicit SSE-KMS headers and the exact key ARN. A recovery upload must supply those settings; default bucket encryption alone does not satisfy the policy. Preserve the disabled Bucket Key setting required by object-scoped KMS conditions.
 
 No cloud authentication, backend migration, lock recovery, plan or apply was performed for this documentation change.

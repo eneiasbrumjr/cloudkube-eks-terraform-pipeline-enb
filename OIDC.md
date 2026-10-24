@@ -1,6 +1,6 @@
 # GitHub Actions OIDC
 
-Reviewed: 2026-10-23. This guide describes the configuration expected by the manual cloud jobs. This repository change does **not** create AWS roles, an OIDC provider, policies, GitHub environment protections, or AWS resources. Authentication and deployment remain unverified in AWS.
+Reviewed: 2026-10-23. This guide describes the configuration expected by the manual cloud jobs. The separate [bootstrap root](bootstrap/README.md) defines AWS roles, OIDC trust and backend permissions, with an explicit choice to create or reuse the provider. No resources or GitHub environment protections have been provisioned. Authentication and deployment remain unverified in AWS.
 
 ## Required GitHub Actions Variables
 
@@ -89,6 +89,8 @@ AWS currently documents GitHub `ref`, `environment`, and immutable ID conditions
 
 Configure the `production` environment's required reviewers and deployment branch rules separately in GitHub. Merely declaring `environment: production` in YAML does not configure those protections. The environment gate authorizes starting the apply job; it does **not** approve a particular Terraform plan, because that job generates its saved plan after the gate and then applies it. See [GitHub environment protection rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
 
-Trust policies only determine who can assume a role. The operator must separately review the plan role's resource-read permissions and the apply role's infrastructure permissions, including IAM/PassRole and KMS responsibilities. No deployment policy, permissions boundary, or bootstrap stack is supplied by this small change. Do not substitute administrator access to make an initial run pass. Backend state and lock permissions are described in [REMOTE_STATE.md](REMOTE_STATE.md).
+Trust policies only determine who can assume a role. The bootstrap roles initially have backend permissions only: `plan_resource_policy_arns` and `apply_resource_policy_arns` default to empty. The operator must review and supply customer-managed resource policies for the selected account, including IAM/PassRole and KMS responsibilities; an external `github_permissions_boundary_arn` is optional. No complete EKS deployment policy or boundary is generated. The explicit protection statements do not certify arbitrary external policies as safe. Do not substitute administrator access to make an initial run pass. Backend permissions are described in [REMOTE_STATE.md](REMOTE_STATE.md).
+
+The bootstrap requires an explicit `github_subject_format` and provider ownership mode. It can validate a reused provider's issuer/audience and output the expected GitHub variables, but it does not configure GitHub settings. Custom subject templates beyond the documented legacy/immutable formats require a reviewed code change.
 
 The workflow runs cloud operations only on explicit manual requests from `main`; PR validation remains independent of AWS credentials. A future operator-authorized check must verify OIDC assumption, effective permissions, remote state/locking, and the actual plan before deployment. Those checks have not been performed in this repository-only review.

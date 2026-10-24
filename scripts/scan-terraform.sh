@@ -26,11 +26,18 @@ trap 'rm -rf "$scan_directory"' EXIT
 report_file="${1:-$scan_directory/results.sarif}"
 
 # An empty cache ensures --skip-check-update uses the pinned binary's bundled checks.
+# Scan both Terraform roots together, with repository-relative SARIF paths.
+# Git metadata and downloaded Terraform caches are not source configurations.
+# --tf-vars supplies the committed synthetic example to every scanned root.
+# Its only input shared with infra is aws_region, matching infra's current default.
 set +e
 trivy config --cache-dir "$scan_directory/cache" \
-  --skip-check-update --disable-telemetry \
+  --skip-check-update --skip-version-check --disable-telemetry \
+  --misconfig-scanners terraform \
+  --skip-dirs .git --skip-dirs .terraform --skip-dirs '**/.terraform' \
+  --tf-vars bootstrap/terraform.tfvars.example \
   --format sarif --severity MEDIUM,HIGH,CRITICAL --exit-code 0 \
-  --output "$report_file" infra 2>"$scan_directory/trivy.log"
+  --output "$report_file" . 2>"$scan_directory/trivy.log"
 scan_status=$?
 set -e
 cat "$scan_directory/trivy.log" >&2
@@ -54,6 +61,10 @@ if report.get("version") != "2.1.0" or not report.get("runs"):
 results = [result for run in report["runs"] for result in run.get("results", [])]
 summary = (
     "## Security scan (advisory)\n\n"
+    "Terraform configurations in infra and bootstrap are scanned from the repository root.\n\n"
+    "This static scan uses synthetic inputs from bootstrap/terraform.tfvars.example. "
+    "The --tf-vars option applies to both roots; the current shared aws_region input "
+    "matches the infra default. Other real input overrides are not covered by this run.\n\n"
     f"Trivy reported {len(results)} findings at medium severity or above.\n\n"
     "Findings do not block this baseline. Review the SARIF report; a successful "
     "check does not mean the configuration is free of findings.\n"

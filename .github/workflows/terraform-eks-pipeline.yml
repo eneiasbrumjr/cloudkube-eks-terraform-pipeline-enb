@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'infra/**'
+      - 'bootstrap/**'
       - '.github/workflows/terraform-eks-pipeline.yml'
       - '.terraform-docs.yml'
       - 'scripts/scan-terraform.sh'
@@ -16,6 +17,7 @@ on:
       - main
     paths:
       - 'infra/**'
+      - 'bootstrap/**'
       - '.github/workflows/terraform-eks-pipeline.yml'
       - '.terraform-docs.yml'
       - 'scripts/scan-terraform.sh'
@@ -51,12 +53,16 @@ env:
 
 jobs:
   terraform-validate:
-    name: "Terraform Format, Validate & Test"
+    name: "Terraform Format, Validate & Test (${{ matrix.root }})"
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        root: [infra, bootstrap]
     defaults:
       run:
-        working-directory: ./infra
+        working-directory: ./${{ matrix.root }}
 
     steps:
       - name: "Checkout"
@@ -66,6 +72,7 @@ jobs:
 
       - name: "Test Local Cloud Configuration Guard"
         id: cloud_config_test
+        if: matrix.root == 'infra'
         run: python3 -B -m unittest discover -s ../scripts/tests -p 'test_*.py'
 
       - name: "Setup Terraform"
@@ -95,6 +102,7 @@ jobs:
       - name: "Summarize Validation"
         if: always()
         env:
+          TERRAFORM_ROOT: ${{ matrix.root }}
           FMT_RESULT: ${{ steps.fmt.outcome }}
           INIT_RESULT: ${{ steps.init.outcome }}
           VALIDATE_RESULT: ${{ steps.validate.outcome }}
@@ -102,15 +110,17 @@ jobs:
           CLOUD_CONFIG_TEST_RESULT: ${{ steps.cloud_config_test.outcome }}
         run: |
           {
-            echo "## Terraform validation"
+            printf '## Terraform validation: %s\n' "$TERRAFORM_ROOT"
             printf '| Check | Result |\n| --- | --- |\n'
             printf '| Format | %s |\n' "$FMT_RESULT"
             printf '| Init without backend | %s |\n' "$INIT_RESULT"
             printf '| Validate | %s |\n' "$VALIDATE_RESULT"
             printf '| Tests with mocked providers | %s |\n' "$TEST_RESULT"
-            printf '| Local cloud configuration guard tests | %s |\n' "$CLOUD_CONFIG_TEST_RESULT"
+            if [ "$TERRAFORM_ROOT" = "infra" ]; then
+              printf '| Local cloud configuration guard tests | %s |\n' "$CLOUD_CONFIG_TEST_RESULT"
+            fi
             echo ""
-            echo "Test plans use mocked AWS and TLS providers. These checks do not authenticate to AWS, plan against a cloud account, or apply resources."
+            echo "Test plans use mocked providers. These checks do not authenticate to AWS, plan against a cloud account, or apply resources."
           } >> "$GITHUB_STEP_SUMMARY"
 
   terraform-security-scan:
@@ -151,12 +161,24 @@ jobs:
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: results.sarif
-          checkout_path: infra
+          checkout_path: .
 
   terraform-docs:
-    name: "Generate Terraform Documentation"
+    name: "Generate Terraform Documentation (${{ matrix.root }})"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - root: infra
+            output_file: ../README.md
+            artifact_file: README.md
+            artifact_name: terraform-documentation
+          - root: bootstrap
+            output_file: README.md
+            artifact_file: bootstrap/README.md
+            artifact_name: bootstrap-terraform-documentation
 
     steps:
       - name: "Checkout"
@@ -167,16 +189,16 @@ jobs:
       - name: "Generate Terraform Docs"
         uses: terraform-docs/gh-actions@v1.1.0
         with:
-          working-dir: infra
-          output-file: ../README.md
+          working-dir: ${{ matrix.root }}
+          output-file: ${{ matrix.output_file }}
           output-method: inject
           git-push: "false"
 
       - name: "Upload Generated README"
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: terraform-documentation
-          path: README.md
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_file }}
           if-no-files-found: error
           retention-days: 7
 

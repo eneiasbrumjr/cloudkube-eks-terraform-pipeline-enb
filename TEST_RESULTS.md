@@ -2,6 +2,50 @@
 
 Last reviewed: 2026-10-23
 
+## Remote-state and GitHub identity bootstrap - 2026-10-23
+
+This change follows merge commit `4a93b0c88e3955f1092c0ee5fd5b114874d04496`. It adds a separate operator-owned Terraform root and extends credential-free validation, scanning and documentation to both roots. Workload resources, Terraform 1.12.2, AWS 5.100.0, TLS 4.2.1 and the workload lockfile are unchanged; the bootstrap lockfile reuses the existing AWS version and official hashes.
+
+| Check | Local result |
+| --- | --- |
+| Terraform fmt and whitespace checks | Passed |
+| Backend-free init with readonly lockfiles, both roots | Passed using verified provider packages without copying the cache |
+| Terraform validation, both roots | Passed |
+| Workload mock plans | **32 passed, 0 failed** |
+| Bootstrap mock plans | **26 passed, 0 failed**: 12 state and 14 identity cases |
+| Offline cloud-guard suite | **16 passed, 0 failed** |
+| actionlint 1.7.12 and scanner Bash syntax | Passed |
+| Trivy 0.76.1 final example-input scan | **0 MEDIUM/HIGH/CRITICAL findings**; both roots identified, no missing-input warnings or parsing errors |
+| Scanner canaries in temporary fixtures | Findings from both roots in one SARIF; invalid bootstrap syntax blocked the scan |
+| terraform-docs 0.17.0 | Generated separate workload/bootstrap references in isolated copies |
+| Independent source review | State/header/policy compatibility and IAM ownership/trust reviewed; no blocking issue remained |
+
+All 58 Terraform runs use `command = plan` with mock providers. Bootstrap fixtures supply only computed identities or explicit responses for a reused OIDC provider; policy assertions inspect the real `jsonencode` output. Coverage includes versioning, ownership/public blocking, encryption/transport policies, distinct state/lock keys, non-secret backend outputs, exact legacy/immutable trust, provider create/reuse, state/lock permissions, KMS service/object contexts, protected resources and external policy/boundary inputs. Rejections cover malformed inputs, state collisions, cross-account providers/policies, wrong issuer/audience, unsupported subject modes, AWS-managed administrator policy input and excessive inline-policy size. `prevent_destroy` was checked by source review, not a source-text assertion test or a real destroy.
+
+The final scanner uses `bootstrap/terraform.tfvars.example` to evaluate the required inputs. A temporary canary proved that Trivy's `--tf-vars` applies across roots. In the committed configuration the only shared variable is `aws_region`, and its example value equals the workload default. The first scan without this file warned about missing bootstrap inputs; that scan was not used as the final evidence. The final run had no such warning, no source changes during execution, and used the pinned binary's bundled checks with fresh cache. No findings were suppressed and severity/policy settings were preserved.
+
+The workflow's manual plan/apply jobs remain unchanged and target only `infra`; the new bootstrap has no deployment dispatch. Automatic jobs now validate both roots and upload separate generated-document artifacts, plus one combined repository-relative SARIF report. Workflow filters include bootstrap changes. The shared pre-commit scanner requires no separate hook configuration change.
+
+Commands from the repository root:
+
+```sh
+terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+terraform -chdir=bootstrap init -backend=false -input=false -lockfile=readonly
+terraform fmt -check -recursive
+terraform -chdir=infra validate -no-color
+terraform -chdir=bootstrap validate -no-color
+terraform -chdir=infra test -no-color
+terraform -chdir=bootstrap test -no-color
+python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
+actionlint .github/workflows/terraform-eks-pipeline.yml
+bash -n scripts/scan-terraform.sh
+bash scripts/scan-terraform.sh /tmp/cloudkube-bootstrap-results.sarif
+```
+
+Provider RPC required local socket access outside the sandbox; AWS credentials/configuration were disabled. An initial sandbox-only bootstrap validation could not start provider RPC; the complete validation and suites subsequently passed with that local restriction lifted. TFLint and the full pre-commit suite were not rerun. Hosted PR and post-merge evidence is recorded in the associated pull request and Actions runs.
+
+**No AWS authentication, real cloud plan/apply, provisioning, state migration, recovery or deployment was performed.** Mock tests check configuration and generated policy structure, not AWS authorization or service behavior. Operator permissions, external policy contents, actual OIDC subjects, GitHub protections, bucket/key ownership, encryption and live locking/recovery still require validation before use. Bootstrap has backend-only role permissions by default and starts with local state. See [bootstrap/README.md](bootstrap/README.md).
+
 ## State and OIDC maintenance - 2026-10-23
 
 This maintenance follows merge commit `45217768fc5ee020e1e3a88088b18460180f9077`. It changes the manual-job identity contract, initialized-backend guard, inactive S3 example, local ignore patterns and operator documentation. Terraform 1.12.2, AWS provider 5.100.0, TLS provider 4.2.1, infrastructure resources, lockfile and scanner policies are unchanged.
