@@ -31,6 +31,7 @@ git clone https://github.com/YOUR-USERNAME/cloudkube-eks-terraform-pipeline-enb.
 cd cloudkube-eks-terraform-pipeline-enb
 pre-commit install
 terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
+terraform -chdir=bootstrap init -backend=false -input=false -lockfile=readonly
 ```
 
 ## Development Workflow
@@ -56,7 +57,9 @@ To run only the security hook:
 pre-commit run terraform_trivy --all-files
 ```
 
-The hook and GitHub Actions use the same `scripts/scan-terraform.sh` script. It scans all of `infra` once, including commits that only remove files. It uses Trivy's bundled checks with an empty temporary cache and reports findings at medium severity or above. Findings remain advisory; tool, parsing, and report errors block the check. The remaining pre-commit hooks retain their existing tools and settings.
+The hook and GitHub Actions use the same `scripts/scan-terraform.sh` script. It scans Terraform in both `infra` and `bootstrap` from the repository root, including commits that only remove files, and excludes Git metadata and downloaded Terraform caches. It uses Trivy's bundled checks with an empty temporary cache and reports findings at medium severity or above. Findings remain advisory; tool, parsing, and report errors block the check. The remaining pre-commit hooks retain their existing tools and settings.
+
+The scanner supplies `bootstrap/terraform.tfvars.example` as a synthetic input scenario so required bootstrap values can be evaluated. Trivy's `--tf-vars` flag applies to all scanned roots; currently only `aws_region` is shared and its example equals the workload default. Review that shared scope when changing example inputs or adding variables. This scan does not validate an operator's complete deployment configuration.
 
 For a direct scan, or to retain a SARIF (Static Analysis Results Interchange Format) report:
 
@@ -67,15 +70,18 @@ bash scripts/scan-terraform.sh /tmp/cloudkube-results.sarif
 
 The default invocation removes its temporary report and cache when it finishes. A supplied relative report path is resolved from the repository root.
 
-From `infra/`:
+Run these checks for each Terraform root:
 
 ```bash
-terraform fmt -recursive
-terraform validate
-terraform test -no-color
+terraform -chdir=infra fmt -check -recursive
+terraform -chdir=infra validate
+terraform -chdir=infra test -no-color
+terraform -chdir=bootstrap fmt -check -recursive
+terraform -chdir=bootstrap validate
+terraform -chdir=bootstrap test -no-color
 ```
 
-If you have the tools installed locally, also run:
+From each root, if you have the tools installed locally, also run:
 
 ```bash
 tflint --config=../.tflint.hcl
@@ -87,6 +93,8 @@ terraform-docs .
 The tests in `infra/tests` use mocked AWS and TLS providers, and every run uses `command = plan`. They cover endpoint and network input guards, version/AMI choices, launch-template SG attachments, metadata/storage settings, allowed traffic paths, private endpoints, optional services, and subnet routing without AWS credentials or resource creation. Provider downloads during `init` still require registry access. Mock tests do not establish regional EKS availability, add-on compatibility with real workloads, or deployment readiness.
 
 When adding a test, keep these automatic runs isolated from real provider operations. Cloud integration checks require a separate, deliberately configured environment.
+
+The independent `bootstrap/tests` mock plans inspect S3/KMS controls, backend key separation and the actual JSON produced for OIDC trust and IAM permissions. Fixtures must supply only provider-computed identities or explicit external-provider responses; do not replace the policy under test with fixture JSON. Preserve explicit operator inputs and keep bootstrap/state migration out of the manual EKS jobs. Both roots have their own committed provider lockfile.
 
 The cloud-guard suite uses synthetic environment values and backend metadata. It checks that missing or inconsistent identity settings and unsafe backend settings stop the manual path; it makes no AWS calls. Keep its checks before credential acquisition and before plan, respectively. If changing the helper or its tests, preserve their workflow path filters. See [OIDC.md](OIDC.md) and [REMOTE_STATE.md](REMOTE_STATE.md) for the operator setup that remains outside these tests.
 

@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Remote-state and GitHub identity bootstrap - 2026-10-23
+
+- Added an independent operator-run Terraform root with a private, versioned S3 state bucket, customer-managed rotating KMS key, ownership/public-access controls, and HTTPS/exact-KMS upload policies.
+- Separated workload and bootstrap state/lock keys, rejected collisions, and kept bootstrap state and backend administration outside routine CI role access.
+- Added an explicit create/reuse choice for the GitHub OIDC provider and exact legacy/immutable subject, audience, repository ID, main-ref and production-environment trust conditions.
+- Created separate plan/apply roles with scoped state/lock/KMS permissions and targeted protection policies. Optional external customer-managed API policies and a permissions boundary require operator review; defaults provide backend access only.
+- Added plan-only mocked tests for bootstrap resources, generated policy JSON, input rejection and ownership choices. Preserved Terraform 1.12.2 and AWS provider 5.100.0.
+- Extended automatic validation and documentation to both roots and the shared Trivy scan to repository-relative Terraform sources; preserved manual jobs for infra only.
+- Added an operator runbook covering initial local state, explicit migration, GitHub configuration and recovery. Backend blocks remain commented; no AWS provisioning or deployment was performed.
+
 ### State and OIDC maintenance - 2026-10-23
 
 - Required OpenID Connect for manual AWS jobs and removed long-lived access-key fallback. Pinned the credentials action to a reviewed release commit.

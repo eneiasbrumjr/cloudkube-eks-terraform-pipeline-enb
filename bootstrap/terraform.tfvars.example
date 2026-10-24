@@ -1,0 +1,18 @@
+# Examples only. Replace the account and choose a globally unique bucket name.
+# This root is run once by an authorized operator, never by the workload CI role.
+aws_account_id     = "123456789012"
+aws_region         = "us-east-1"
+name_prefix        = "cloudkube"
+state_bucket_name  = "replace-me-cloudkube-state-123456789012"
+workload_state_key = "cloudkube/production/terraform.tfstate"
+
+# This root starts with LOCAL state. The following key is only a suggested
+# destination for a later, explicit operator-controlled backend migration.
+bootstrap_state_key = "bootstrap/terraform.tfstate"
+
+# Choose based on the repository's actual GitHub OIDC subject format. This does
+# not change GitHub settings. Existing-provider mode uses its explicitly supplied ARN.
+github_subject_format     = "legacy"
+github_oidc_provider_mode = "create"
+# github_oidc_provider_mode         = "existing"
+# github_existing_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
